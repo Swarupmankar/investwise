@@ -1,0 +1,136 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    /* Ultra-Professional Fintech Theme */
+    --background: 0 0% 99%; /* Almost white for premium feel */
+    --foreground: 215 25% 15%; /* Deep sophisticated blue-grey */
+
+    --card: 0 0% 100%; /* Pure white cards */
+    --card-foreground: 215 25% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 25% 15%;
+
+    --primary: 358 98% 49%; /* Updated to red #F50308 */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 215 25% 97%; /* Ultra-light grey */
+    --secondary-foreground: 215 25% 15%;
+
+    --muted: 215 25% 97%;
+    --muted-foreground: 215 10% 55%; /* Refined muted text */
+
+    --accent: 215 25% 97%;
+    --accent-foreground: 215 25% 15%;
+
+    --destructive: 0 100% 67%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 215 25% 92%; /* Ultra-subtle borders */
+    --input: 215 25% 97%;
+    --ring: 358 98% 49%;
+
+    --success: 142 86% 28%; /* Deep professional green */
+    --warning: 38 100% 50%;
+    
+    --sidebar-bg: 215 30% 8%; /* Ultra-dark sophisticated sidebar */
+    --sidebar-foreground: 0 0% 96%;
+    --sidebar-muted: 215 30% 12%;
+    --sidebar-accent: 358 98% 49%;
+    
+    --radius: 8px; /* Slightly larger for premium feel */
+
+    /* Premium gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(358 98% 49%), hsl(358 98% 58%));
+    --gradient-card: linear-gradient(145deg, hsl(0 0% 100%), hsl(215 25% 98%));
+    --gradient-sidebar: linear-gradient(180deg, hsl(215 30% 8%), hsl(215 30% 6%));
+
+    /* Professional shadows */
+    --shadow-card: 0 1px 3px 0 hsl(215 25% 15% / 0.06), 0 1px 2px -1px hsl(215 25% 15% / 0.06);
+    --shadow-card-hover: 0 4px 6px -1px hsl(215 25% 15% / 0.08), 0 2px 4px -2px hsl(215 25% 15% / 0.06);
+    --shadow-premium: 0 10px 25px -5px hsl(215 25% 15% / 0.08), 0 8px 10px -6px hsl(215 25% 15% / 0.08);
+
+    /* Animations for fade-in effects */
+    --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .dark {
+    --background: 215 30% 8%;
+    --foreground: 0 0% 96%;
+    --card: 215 30% 10%;
+    --card-foreground: 0 0% 96%;
+    --primary: 358 98% 58%;
+    --muted: 215 30% 12%;
+    --border: 215 30% 15%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    /* Fluid base size: slightly smaller on narrower desktops, capped for readability */
+    font-size: clamp(14.5px, 0.85vw + 4px, 16px);
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+@layer components {
+  .card-premium {
+    @apply bg-white border border-border rounded-lg;
+    box-shadow: var(--shadow-card);
+    transition: box-shadow 0.2s ease;
+  }
+  
+  .card-premium:hover {
+    box-shadow: var(--shadow-card-hover);
+  }
+
+  .gradient-primary {
+    background: var(--gradient-primary);
+  }
+
+  .gradient-card {
+    background: var(--gradient-card);
+  }
+
+  .text-gradient {
+    background: var(--gradient-primary);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .shadow-premium {
+    box-shadow: var(--shadow-premium);
+  }
+
+  /* Animation classes */
+  .animate-fade-in {
+    animation: fadeIn 0.3s ease-out;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
