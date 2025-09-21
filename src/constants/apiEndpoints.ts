@@ -39,6 +39,6 @@ export const ENDPOINTS = {
 
   TRANSACTIONS: {
     CREATE_DEPOSIT: "/users/transactions/create-deposit-transaction",
-    GET_TRANSACTIONS: "/users/transactions/transactions",
+    GET_TRANSACTIONS: "/users/transactions",
   },
 };
