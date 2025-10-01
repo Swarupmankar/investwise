@@ -1,18 +1,46 @@
-import { useState } from "react";
+// QuestionnaireModal.tsx + InvestorQuestionnaire.tsx
+// Replace your existing two files with this single file (or split into two files as appropriate).
+
+import React, { useEffect, useRef, useState } from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { AlertTriangle, CheckCircle } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Calendar } from "@/components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { CalendarIcon, ChevronLeft, ChevronRight } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 
-interface QuestionnaireData {
+import { useToast } from "@/components/ui/use-toast";
+
+export interface QuestionnaireData {
   fullName: string;
   address: string;
   dateOfBirth: Date | undefined;
@@ -38,92 +66,182 @@ interface QuestionnaireData {
 interface InvestorQuestionnaireProps {
   onComplete: (data: QuestionnaireData) => void;
   onBack: () => void;
+  onDataChange?: (data: QuestionnaireData) => void;
+  jumpToStep?: number;
+  onJumpHandled?: () => void;
+  isSubmitting?: boolean;
+  invalidQuestionIds?: number[];
+  focusInvalidSignal?: number;
 }
 
-const InvestorQuestionnaire = ({ onComplete, onBack }: InvestorQuestionnaireProps) => {
+const defaultFormData = (): QuestionnaireData => ({
+  fullName: "",
+  address: "",
+  dateOfBirth: undefined,
+  email: "",
+  phone: "",
+  annualIncome: "",
+  previousInvestments: "",
+  investmentExperience: "",
+  occupation: "",
+  initialInvestment: "",
+  investmentTimeline: "",
+  investmentGoal: "",
+  investmentDuration: "",
+  fundsSource: "",
+  education: "",
+  referralSource: "",
+  referralInterest: "",
+  cryptoFamiliarity: "",
+  fundsControl: "",
+  cryptoWallet: "",
+});
+
+const InvestorQuestionnaire = ({
+  onComplete,
+  onBack,
+  onDataChange,
+  jumpToStep,
+  onJumpHandled,
+  isSubmitting,
+  invalidQuestionIds,
+  focusInvalidSignal,
+}: InvestorQuestionnaireProps) => {
   const [currentStep, setCurrentStep] = useState(1);
   const totalSteps = 4;
-  
-  const [formData, setFormData] = useState<QuestionnaireData>({
-    fullName: "",
-    address: "",
-    dateOfBirth: undefined,
-    email: "",
-    phone: "",
-    annualIncome: "",
-    previousInvestments: "",
-    investmentExperience: "",
-    occupation: "",
-    initialInvestment: "",
-    investmentTimeline: "",
-    investmentGoal: "",
-    investmentDuration: "",
-    fundsSource: "",
-    education: "",
-    referralSource: "",
-    referralInterest: "",
-    cryptoFamiliarity: "",
-    fundsControl: "",
-    cryptoWallet: ""
-  });
+  const [formData, setFormData] = useState<QuestionnaireData>(
+    defaultFormData()
+  );
 
-  const handleInputChange = (field: keyof QuestionnaireData, value: string | Date | undefined) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+  // refs are not required for every field; we'll use DOM query focusing by data-question-id
+  // apply external jumpToStep
+  useEffect(() => {
+    if (jumpToStep && jumpToStep >= 1 && jumpToStep <= totalSteps) {
+      setCurrentStep(jumpToStep);
+      // small delay then notify parent
+      setTimeout(() => {
+        onJumpHandled?.();
+        // scroll top so the error block is visible in modal parent
+        const container = document.querySelector(".investor-questionnaire-top");
+        if (container)
+          (container as HTMLElement).scrollIntoView({
+            behavior: "smooth",
+            block: "start",
+          });
+      }, 120);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jumpToStep]);
+
+  // notify parent of data changes
+  useEffect(() => {
+    onDataChange?.(formData);
+  }, [formData, onDataChange]);
+
+  // when invalidQuestionIds / focusInvalidSignal change, try to focus first invalid element
+  useEffect(() => {
+    if (!invalidQuestionIds || invalidQuestionIds.length === 0) return;
+    // find the first invalid question id and focus its first focusable child
+    const first = invalidQuestionIds[0];
+    const wrapper = document.querySelector(
+      `[data-question-id=\"${first}\"]`
+    ) as HTMLElement | null;
+    if (wrapper) {
+      // find focusable element
+      const focusable = wrapper.querySelector(
+        'input, textarea, button, select, [role="combobox"]'
+      ) as HTMLElement | null;
+      focusable?.focus();
+      // highlight briefly (tailwind classes used above also show red border)
+    }
+  }, [invalidQuestionIds, focusInvalidSignal]);
+
+  const handleInputChange = (
+    field: keyof QuestionnaireData,
+    value: string | Date | undefined
+  ) => {
+    setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
   const handleNext = () => {
     if (currentStep < totalSteps) {
-      setCurrentStep(currentStep + 1);
+      setCurrentStep((cs) => cs + 1);
     } else {
       onComplete(formData);
     }
   };
 
   const handlePrevious = () => {
-    if (currentStep > 1) {
-      setCurrentStep(currentStep - 1);
-    } else {
-      onBack();
-    }
+    if (currentStep > 1) setCurrentStep((cs) => cs - 1);
+    else onBack();
   };
+
+  // helpers to check invalid state for a questionId
+  const isInvalid = (questionId: number) =>
+    invalidQuestionIds?.includes(questionId);
+
+  // For each group, add `data-question-id` to wrapper and apply red styles to the form control when invalid
 
   const renderStep1 = () => (
     <div className="space-y-4">
-      <div className="space-y-2">
-        <Label htmlFor="fullName">1. What is your full legal name as per official records?</Label>
+      <div data-question-id="1" className="space-y-2">
+        <Label
+          htmlFor="fullName"
+          className={isInvalid(1) ? "text-red-600" : ""}
+        >
+          1. What is your full legal name as per official records?
+        </Label>
         <Input
           id="fullName"
           value={formData.fullName}
           onChange={(e) => handleInputChange("fullName", e.target.value)}
           placeholder="Enter your full legal name"
           required
+          className={cn(
+            isInvalid(1) ? "border-red-500 ring-1 ring-red-500" : ""
+          )}
         />
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="address">2. What is your complete address as mentioned in your official identification document?</Label>
+      <div data-question-id="2" className="space-y-2">
+        <Label htmlFor="address" className={isInvalid(2) ? "text-red-600" : ""}>
+          2. What is your complete address as mentioned in your official
+          identification document?
+        </Label>
         <Textarea
           id="address"
           value={formData.address}
           onChange={(e) => handleInputChange("address", e.target.value)}
           placeholder="Enter your complete address"
           required
+          className={cn(
+            isInvalid(2) ? "border-red-500 ring-1 ring-red-500" : ""
+          )}
         />
       </div>
 
-      <div className="space-y-2">
-        <Label>3. What is your date of birth as per your official identification documents?</Label>
+      <div data-question-id="3" className="space-y-2">
+        <Label className={isInvalid(3) ? "text-red-600" : ""}>
+          3. What is your date of birth as per your official identification
+          documents?
+        </Label>
         <Popover>
           <PopoverTrigger asChild>
             <Button
               variant="outline"
               className={cn(
                 "w-full justify-start text-left font-normal",
-                !formData.dateOfBirth && "text-muted-foreground"
+                !formData.dateOfBirth && "text-muted-foreground",
+                isInvalid(3) ? "border-red-500 ring-1 ring-red-500" : ""
               )}
+              aria-label="Pick date of birth"
             >
               <CalendarIcon className="mr-2 h-4 w-4" />
-              {formData.dateOfBirth ? format(formData.dateOfBirth, "PPP") : <span>Pick a date</span>}
+              {formData.dateOfBirth ? (
+                format(formData.dateOfBirth, "PPP")
+              ) : (
+                <span>Pick a date</span>
+              )}
             </Button>
           </PopoverTrigger>
           <PopoverContent className="w-auto p-0" align="start">
@@ -131,7 +249,9 @@ const InvestorQuestionnaire = ({ onComplete, onBack }: InvestorQuestionnaireProp
               mode="single"
               selected={formData.dateOfBirth}
               onSelect={(date) => handleInputChange("dateOfBirth", date)}
-              disabled={(date) => date > new Date() || date < new Date("1900-01-01")}
+              disabled={(date) =>
+                date > new Date() || date < new Date("1900-01-01")
+              }
               initialFocus
               className={cn("p-3 pointer-events-auto")}
             />
@@ -139,8 +259,10 @@ const InvestorQuestionnaire = ({ onComplete, onBack }: InvestorQuestionnaireProp
         </Popover>
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="email">4. What is your primary email address for official communication?</Label>
+      <div data-question-id="4" className="space-y-2">
+        <Label htmlFor="email" className={isInvalid(4) ? "text-red-600" : ""}>
+          4. What is your primary email address for official communication?
+        </Label>
         <Input
           id="email"
           type="email"
@@ -148,11 +270,16 @@ const InvestorQuestionnaire = ({ onComplete, onBack }: InvestorQuestionnaireProp
           onChange={(e) => handleInputChange("email", e.target.value)}
           placeholder="Enter your email address"
           required
+          className={cn(
+            isInvalid(4) ? "border-red-500 ring-1 ring-red-500" : ""
+          )}
         />
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="phone">5. What is your active contact number for communication purposes?</Label>
+      <div data-question-id="5" className="space-y-2">
+        <Label htmlFor="phone" className={isInvalid(5) ? "text-red-600" : ""}>
+          5. What is your active contact number for communication purposes?
+        </Label>
         <Input
           id="phone"
           type="tel"
@@ -160,6 +287,9 @@ const InvestorQuestionnaire = ({ onComplete, onBack }: InvestorQuestionnaireProp
           onChange={(e) => handleInputChange("phone", e.target.value)}
           placeholder="Enter your phone number"
           required
+          className={cn(
+            isInvalid(5) ? "border-red-500 ring-1 ring-red-500" : ""
+          )}
         />
       </div>
     </div>
@@ -167,10 +297,19 @@ const InvestorQuestionnaire = ({ onComplete, onBack }: InvestorQuestionnaireProp
 
   const renderStep2 = () => (
     <div className="space-y-4">
-      <div className="space-y-2">
-        <Label>6. What is your approximate annual income (in USD)?</Label>
-        <Select value={formData.annualIncome} onValueChange={(value) => handleInputChange("annualIncome", value)}>
-          <SelectTrigger>
+      <div data-question-id="6" className="space-y-2">
+        <Label className={isInvalid(6) ? "text-red-600" : ""}>
+          6. What is your approximate annual income (in USD)?
+        </Label>
+        <Select
+          value={formData.annualIncome}
+          onValueChange={(value) => handleInputChange("annualIncome", value)}
+        >
+          <SelectTrigger
+            className={cn(
+              isInvalid(6) ? "border-red-500 ring-1 ring-red-500" : ""
+            )}
+          >
             <SelectValue placeholder="Select your annual income range" />
           </SelectTrigger>
           <SelectContent>
@@ -182,25 +321,56 @@ const InvestorQuestionnaire = ({ onComplete, onBack }: InvestorQuestionnaireProp
         </Select>
       </div>
 
-      <div className="space-y-2">
-        <Label>7. Have you previously invested in any financial assets or instruments?</Label>
-        <Select value={formData.previousInvestments} onValueChange={(value) => handleInputChange("previousInvestments", value)}>
-          <SelectTrigger>
+      <div data-question-id="7" className="space-y-2">
+        <Label className={isInvalid(7) ? "text-red-600" : ""}>
+          7. Have you previously invested in any financial assets or
+          instruments?
+        </Label>
+        <Select
+          value={formData.previousInvestments}
+          onValueChange={(value) =>
+            handleInputChange("previousInvestments", value)
+          }
+        >
+          <SelectTrigger
+            className={cn(
+              isInvalid(7) ? "border-red-500 ring-1 ring-red-500" : ""
+            )}
+          >
             <SelectValue placeholder="Select your investment history" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="regular-multiple">Yes, I have regularly invested in multiple asset classes</SelectItem>
-            <SelectItem value="occasional-selected">Yes, occasionally in selected asset types</SelectItem>
-            <SelectItem value="planning-start">No, but I am planning to start now</SelectItem>
-            <SelectItem value="never-invested">No, I have never invested before</SelectItem>
+            <SelectItem value="regular-multiple">
+              Yes, I have regularly invested in multiple asset classes
+            </SelectItem>
+            <SelectItem value="occasional-selected">
+              Yes, occasionally in selected asset types
+            </SelectItem>
+            <SelectItem value="planning-start">
+              No, but I am planning to start now
+            </SelectItem>
+            <SelectItem value="never-invested">
+              No, I have never invested before
+            </SelectItem>
           </SelectContent>
         </Select>
       </div>
 
-      <div className="space-y-2">
-        <Label>8. How much experience do you have with investing?</Label>
-        <Select value={formData.investmentExperience} onValueChange={(value) => handleInputChange("investmentExperience", value)}>
-          <SelectTrigger>
+      <div data-question-id="8" className="space-y-2">
+        <Label className={isInvalid(8) ? "text-red-600" : ""}>
+          8. How much experience do you have with investing?
+        </Label>
+        <Select
+          value={formData.investmentExperience}
+          onValueChange={(value) =>
+            handleInputChange("investmentExperience", value)
+          }
+        >
+          <SelectTrigger
+            className={cn(
+              isInvalid(8) ? "border-red-500 ring-1 ring-red-500" : ""
+            )}
+          >
             <SelectValue placeholder="Select your experience level" />
           </SelectTrigger>
           <SelectContent>
@@ -212,15 +382,28 @@ const InvestorQuestionnaire = ({ onComplete, onBack }: InvestorQuestionnaireProp
         </Select>
       </div>
 
-      <div className="space-y-2">
-        <Label>9. What is your current occupation?</Label>
-        <Select value={formData.occupation} onValueChange={(value) => handleInputChange("occupation", value)}>
-          <SelectTrigger>
+      <div data-question-id="9" className="space-y-2">
+        <Label className={isInvalid(9) ? "text-red-600" : ""}>
+          9. What is your current occupation?
+        </Label>
+        <Select
+          value={formData.occupation}
+          onValueChange={(value) => handleInputChange("occupation", value)}
+        >
+          <SelectTrigger
+            className={cn(
+              isInvalid(9) ? "border-red-500 ring-1 ring-red-500" : ""
+            )}
+          >
             <SelectValue placeholder="Select your occupation" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="salaried">Salaried (Private/Government Sector)</SelectItem>
-            <SelectItem value="self-employed">Self-Employed / Business Owner</SelectItem>
+            <SelectItem value="salaried">
+              Salaried (Private/Government Sector)
+            </SelectItem>
+            <SelectItem value="self-employed">
+              Self-Employed / Business Owner
+            </SelectItem>
             <SelectItem value="student">Student</SelectItem>
             <SelectItem value="retired">Retired</SelectItem>
             <SelectItem value="homemaker">Homemaker</SelectItem>
@@ -229,10 +412,21 @@ const InvestorQuestionnaire = ({ onComplete, onBack }: InvestorQuestionnaireProp
         </Select>
       </div>
 
-      <div className="space-y-2">
-        <Label>10. How much are you planning to invest with us initially?</Label>
-        <Select value={formData.initialInvestment} onValueChange={(value) => handleInputChange("initialInvestment", value)}>
-          <SelectTrigger>
+      <div data-question-id="10" className="space-y-2">
+        <Label className={isInvalid(10) ? "text-red-600" : ""}>
+          10. How much are you planning to invest with us initially?
+        </Label>
+        <Select
+          value={formData.initialInvestment}
+          onValueChange={(value) =>
+            handleInputChange("initialInvestment", value)
+          }
+        >
+          <SelectTrigger
+            className={cn(
+              isInvalid(10) ? "border-red-500 ring-1 ring-red-500" : ""
+            )}
+          >
             <SelectValue placeholder="Select initial investment amount" />
           </SelectTrigger>
           <SelectContent>
@@ -250,10 +444,21 @@ const InvestorQuestionnaire = ({ onComplete, onBack }: InvestorQuestionnaireProp
 
   const renderStep3 = () => (
     <div className="space-y-4">
-      <div className="space-y-2">
-        <Label>11. How soon are you willing to make your first investment with us?</Label>
-        <Select value={formData.investmentTimeline} onValueChange={(value) => handleInputChange("investmentTimeline", value)}>
-          <SelectTrigger>
+      <div data-question-id="11" className="space-y-2">
+        <Label className={isInvalid(11) ? "text-red-600" : ""}>
+          11. How soon are you willing to make your first investment with us?
+        </Label>
+        <Select
+          value={formData.investmentTimeline}
+          onValueChange={(value) =>
+            handleInputChange("investmentTimeline", value)
+          }
+        >
+          <SelectTrigger
+            className={cn(
+              isInvalid(11) ? "border-red-500 ring-1 ring-red-500" : ""
+            )}
+          >
             <SelectValue placeholder="Select investment timeline" />
           </SelectTrigger>
           <SelectContent>
@@ -265,26 +470,54 @@ const InvestorQuestionnaire = ({ onComplete, onBack }: InvestorQuestionnaireProp
         </Select>
       </div>
 
-      <div className="space-y-2">
-        <Label>12. What is the primary goal behind your decision to invest with us?</Label>
-        <Select value={formData.investmentGoal} onValueChange={(value) => handleInputChange("investmentGoal", value)}>
-          <SelectTrigger>
+      <div data-question-id="12" className="space-y-2">
+        <Label className={isInvalid(12) ? "text-red-600" : ""}>
+          12. What is the primary goal behind your decision to invest with us?
+        </Label>
+        <Select
+          value={formData.investmentGoal}
+          onValueChange={(value) => handleInputChange("investmentGoal", value)}
+        >
+          <SelectTrigger
+            className={cn(
+              isInvalid(12) ? "border-red-500 ring-1 ring-red-500" : ""
+            )}
+          >
             <SelectValue placeholder="Select your investment goal" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="wealth-creation">Wealth creation over the long term</SelectItem>
-            <SelectItem value="passive-income">Earning consistent passive income</SelectItem>
-            <SelectItem value="specific-goal">Saving for a specific life goal</SelectItem>
-            <SelectItem value="diversification">Diversifying existing portfolio</SelectItem>
+            <SelectItem value="wealth-creation">
+              Wealth creation over the long term
+            </SelectItem>
+            <SelectItem value="passive-income">
+              Earning consistent passive income
+            </SelectItem>
+            <SelectItem value="specific-goal">
+              Saving for a specific life goal
+            </SelectItem>
+            <SelectItem value="diversification">
+              Diversifying existing portfolio
+            </SelectItem>
             <SelectItem value="other">Other</SelectItem>
           </SelectContent>
         </Select>
       </div>
 
-      <div className="space-y-2">
-        <Label>13. How long are you willing to invest?</Label>
-        <Select value={formData.investmentDuration} onValueChange={(value) => handleInputChange("investmentDuration", value)}>
-          <SelectTrigger>
+      <div data-question-id="13" className="space-y-2">
+        <Label className={isInvalid(13) ? "text-red-600" : ""}>
+          13. How long are you willing to invest?
+        </Label>
+        <Select
+          value={formData.investmentDuration}
+          onValueChange={(value) =>
+            handleInputChange("investmentDuration", value)
+          }
+        >
+          <SelectTrigger
+            className={cn(
+              isInvalid(13) ? "border-red-500 ring-1 ring-red-500" : ""
+            )}
+          >
             <SelectValue placeholder="Select investment duration" />
           </SelectTrigger>
           <SelectContent>
@@ -297,17 +530,28 @@ const InvestorQuestionnaire = ({ onComplete, onBack }: InvestorQuestionnaireProp
         </Select>
       </div>
 
-      <div className="space-y-2">
-        <Label>14. What would be the source of the funds you are planning to invest?</Label>
-        <Select value={formData.fundsSource} onValueChange={(value) => handleInputChange("fundsSource", value)}>
-          <SelectTrigger>
+      <div data-question-id="14" className="space-y-2">
+        <Label className={isInvalid(14) ? "text-red-600" : ""}>
+          14. What would be the source of the funds you are planning to invest?
+        </Label>
+        <Select
+          value={formData.fundsSource}
+          onValueChange={(value) => handleInputChange("fundsSource", value)}
+        >
+          <SelectTrigger
+            className={cn(
+              isInvalid(14) ? "border-red-500 ring-1 ring-red-500" : ""
+            )}
+          >
             <SelectValue placeholder="Select funds source" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="salary">Salary / Employment Income</SelectItem>
             <SelectItem value="business">Business Income</SelectItem>
             <SelectItem value="passive">Rental or Passive Income</SelectItem>
-            <SelectItem value="asset-sale">Sale of Assets or Investments</SelectItem>
+            <SelectItem value="asset-sale">
+              Sale of Assets or Investments
+            </SelectItem>
             <SelectItem value="inheritance">Inheritance or Gift</SelectItem>
             <SelectItem value="savings">Personal Savings</SelectItem>
             <SelectItem value="other">Other</SelectItem>
@@ -315,18 +559,33 @@ const InvestorQuestionnaire = ({ onComplete, onBack }: InvestorQuestionnaireProp
         </Select>
       </div>
 
-      <div className="space-y-2">
-        <Label>15. What is your highest level of educational qualification?</Label>
-        <Select value={formData.education} onValueChange={(value) => handleInputChange("education", value)}>
-          <SelectTrigger>
+      <div data-question-id="15" className="space-y-2">
+        <Label className={isInvalid(15) ? "text-red-600" : ""}>
+          15. What is your highest level of educational qualification?
+        </Label>
+        <Select
+          value={formData.education}
+          onValueChange={(value) => handleInputChange("education", value)}
+        >
+          <SelectTrigger
+            className={cn(
+              isInvalid(15) ? "border-red-500 ring-1 ring-red-500" : ""
+            )}
+          >
             <SelectValue placeholder="Select education level" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="high-school">High School or Equivalent</SelectItem>
+            <SelectItem value="high-school">
+              High School or Equivalent
+            </SelectItem>
             <SelectItem value="bachelors">Bachelor's Degree</SelectItem>
             <SelectItem value="masters">Master's Degree</SelectItem>
-            <SelectItem value="doctorate">Doctorate (Ph.D. or equivalent)</SelectItem>
-            <SelectItem value="professional">Professional Certification</SelectItem>
+            <SelectItem value="doctorate">
+              Doctorate (Ph.D. or equivalent)
+            </SelectItem>
+            <SelectItem value="professional">
+              Professional Certification
+            </SelectItem>
             <SelectItem value="other">Other</SelectItem>
           </SelectContent>
         </Select>
@@ -336,27 +595,56 @@ const InvestorQuestionnaire = ({ onComplete, onBack }: InvestorQuestionnaireProp
 
   const renderStep4 = () => (
     <div className="space-y-4">
-      <div className="space-y-2">
-        <Label>16. How did you hear about our investment platform?</Label>
-        <Select value={formData.referralSource} onValueChange={(value) => handleInputChange("referralSource", value)}>
-          <SelectTrigger>
+      <div data-question-id="16" className="space-y-2">
+        <Label className={isInvalid(16) ? "text-red-600" : ""}>
+          16. How did you hear about our investment platform?
+        </Label>
+        <Select
+          value={formData.referralSource}
+          onValueChange={(value) => handleInputChange("referralSource", value)}
+        >
+          <SelectTrigger
+            className={cn(
+              isInvalid(16) ? "border-red-500 ring-1 ring-red-500" : ""
+            )}
+          >
             <SelectValue placeholder="Select referral source" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="financial-advisor">Through a financial advisor</SelectItem>
-            <SelectItem value="referral">Referral from a friend or family member</SelectItem>
-            <SelectItem value="social-media">Social media or online advertisement</SelectItem>
-            <SelectItem value="seminar">Investment seminar or webinar</SelectItem>
+            <SelectItem value="financial-advisor">
+              Through a financial advisor
+            </SelectItem>
+            <SelectItem value="referral">
+              Referral from a friend or family member
+            </SelectItem>
+            <SelectItem value="social-media">
+              Social media or online advertisement
+            </SelectItem>
+            <SelectItem value="seminar">
+              Investment seminar or webinar
+            </SelectItem>
             <SelectItem value="news">News or media coverage</SelectItem>
             <SelectItem value="other">Other</SelectItem>
           </SelectContent>
         </Select>
       </div>
 
-      <div className="space-y-2">
-        <Label>17. Would you be willing to earn additional income by referring our platform to others?</Label>
-        <Select value={formData.referralInterest} onValueChange={(value) => handleInputChange("referralInterest", value)}>
-          <SelectTrigger>
+      <div data-question-id="17" className="space-y-2">
+        <Label className={isInvalid(17) ? "text-red-600" : ""}>
+          17. Would you be willing to earn additional income by referring our
+          platform to others?
+        </Label>
+        <Select
+          value={formData.referralInterest}
+          onValueChange={(value) =>
+            handleInputChange("referralInterest", value)
+          }
+        >
+          <SelectTrigger
+            className={cn(
+              isInvalid(17) ? "border-red-500 ring-1 ring-red-500" : ""
+            )}
+          >
             <SelectValue placeholder="Select your interest in referrals" />
           </SelectTrigger>
           <SelectContent>
@@ -368,40 +656,86 @@ const InvestorQuestionnaire = ({ onComplete, onBack }: InvestorQuestionnaireProp
         </Select>
       </div>
 
-      <div className="space-y-2">
-        <Label>18. Are you familiar with cryptocurrency transfers?</Label>
-        <Select value={formData.cryptoFamiliarity} onValueChange={(value) => handleInputChange("cryptoFamiliarity", value)}>
-          <SelectTrigger>
+      <div data-question-id="18" className="space-y-2">
+        <Label className={isInvalid(18) ? "text-red-600" : ""}>
+          18. Are you familiar with cryptocurrency transfers?
+        </Label>
+        <Select
+          value={formData.cryptoFamiliarity}
+          onValueChange={(value) =>
+            handleInputChange("cryptoFamiliarity", value)
+          }
+        >
+          <SelectTrigger
+            className={cn(
+              isInvalid(18) ? "border-red-500 ring-1 ring-red-500" : ""
+            )}
+          >
             <SelectValue placeholder="Select your crypto familiarity" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="fully-comfortable">Yes, I'm fully comfortable with crypto transfers</SelectItem>
-            <SelectItem value="occasionally">I've used them occasionally and can manage</SelectItem>
-            <SelectItem value="need-assistance">I've heard of them but need assistance</SelectItem>
-            <SelectItem value="not-familiar">No, I'm not familiar at all</SelectItem>
+            <SelectItem value="fully-comfortable">
+              Yes, I'm fully comfortable with crypto transfers
+            </SelectItem>
+            <SelectItem value="occasionally">
+              I've used them occasionally and can manage
+            </SelectItem>
+            <SelectItem value="need-assistance">
+              I've heard of them but need assistance
+            </SelectItem>
+            <SelectItem value="not-familiar">
+              No, I'm not familiar at all
+            </SelectItem>
           </SelectContent>
         </Select>
       </div>
 
-      <div className="space-y-2">
-        <Label>19. Can you confirm that you are the sole controller of your funds and crypto wallet?</Label>
-        <Select value={formData.fundsControl} onValueChange={(value) => handleInputChange("fundsControl", value)}>
-          <SelectTrigger>
+      <div data-question-id="19" className="space-y-2">
+        <Label className={isInvalid(19) ? "text-red-600" : ""}>
+          19. Can you confirm that you are the sole controller of your funds and
+          crypto wallet?
+        </Label>
+        <Select
+          value={formData.fundsControl}
+          onValueChange={(value) => handleInputChange("fundsControl", value)}
+        >
+          <SelectTrigger
+            className={cn(
+              isInvalid(19) ? "border-red-500 ring-1 ring-red-500" : ""
+            )}
+          >
             <SelectValue placeholder="Confirm funds control" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="sole-controller">Yes, I confirm I am the sole controller</SelectItem>
-            <SelectItem value="joint-management">I manage it jointly with someone I fully trust</SelectItem>
-            <SelectItem value="need-guidance">I'm unsure and need guidance</SelectItem>
-            <SelectItem value="someone-helping">Someone else is helping me manage my funds</SelectItem>
+            <SelectItem value="sole-controller">
+              Yes, I confirm I am the sole controller
+            </SelectItem>
+            <SelectItem value="joint-management">
+              I manage it jointly with someone I fully trust
+            </SelectItem>
+            <SelectItem value="need-guidance">
+              I'm unsure and need guidance
+            </SelectItem>
+            <SelectItem value="someone-helping">
+              Someone else is helping me manage my funds
+            </SelectItem>
           </SelectContent>
         </Select>
       </div>
 
-      <div className="space-y-2">
-        <Label>20. Which cryptocurrency wallet or exchange do you currently use?</Label>
-        <Select value={formData.cryptoWallet} onValueChange={(value) => handleInputChange("cryptoWallet", value)}>
-          <SelectTrigger>
+      <div data-question-id="20" className="space-y-2">
+        <Label className={isInvalid(20) ? "text-red-600" : ""}>
+          20. Which cryptocurrency wallet or exchange do you currently use?
+        </Label>
+        <Select
+          value={formData.cryptoWallet}
+          onValueChange={(value) => handleInputChange("cryptoWallet", value)}
+        >
+          <SelectTrigger
+            className={cn(
+              isInvalid(20) ? "border-red-500 ring-1 ring-red-500" : ""
+            )}
+          >
             <SelectValue placeholder="Select your crypto wallet/exchange" />
           </SelectTrigger>
           <SelectContent>
@@ -419,15 +753,18 @@ const InvestorQuestionnaire = ({ onComplete, onBack }: InvestorQuestionnaireProp
   );
 
   return (
-    <Card className="w-full max-w-2xl mx-auto">
+    <Card className="w-full max-w-2xl mx-auto investor-questionnaire-top">
       <CardHeader className="text-center">
-        <CardTitle className="text-2xl font-bold">Investor Onboarding Questionnaire</CardTitle>
+        <CardTitle className="text-2xl font-bold">
+          Investor Onboarding Questionnaire
+        </CardTitle>
         <CardDescription>
-          Step {currentStep} of {totalSteps} - Please provide accurate information for compliance purposes
+          Step {currentStep} of {totalSteps} - Please provide accurate
+          information for compliance purposes
         </CardDescription>
         <div className="w-full bg-muted rounded-full h-2 mt-4">
-          <div 
-            className="bg-primary h-2 rounded-full transition-all duration-300" 
+          <div
+            className="bg-primary h-2 rounded-full transition-all duration-300"
             style={{ width: `${(currentStep / totalSteps) * 100}%` }}
           />
         </div>
@@ -438,25 +775,33 @@ const InvestorQuestionnaire = ({ onComplete, onBack }: InvestorQuestionnaireProp
           {currentStep === 2 && renderStep2()}
           {currentStep === 3 && renderStep3()}
           {currentStep === 4 && renderStep4()}
-          
+
           <div className="flex justify-between gap-4 pt-4">
-            <Button 
-              type="button" 
-              variant="outline" 
+            <Button
+              type="button"
+              variant="outline"
               onClick={handlePrevious}
               className="flex items-center gap-2"
+              disabled={!!isSubmitting}
             >
               <ChevronLeft className="h-4 w-4" />
               {currentStep === 1 ? "Back to Registration" : "Previous"}
             </Button>
-            
-            <Button 
-              type="button" 
+
+            <Button
+              type="button"
               onClick={handleNext}
               className="flex items-center gap-2"
+              disabled={!!isSubmitting}
             >
-              {currentStep === totalSteps ? "Complete Registration" : "Next"}
-              {currentStep !== totalSteps && <ChevronRight className="h-4 w-4" />}
+              {currentStep === totalSteps
+                ? isSubmitting
+                  ? "Saving..."
+                  : "Complete Registration"
+                : "Next"}
+              {currentStep !== totalSteps && (
+                <ChevronRight className="h-4 w-4" />
+              )}
             </Button>
           </div>
         </div>

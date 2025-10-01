@@ -41,4 +41,16 @@ export const ENDPOINTS = {
     CREATE_DEPOSIT: "/users/transactions/create-deposit-transaction",
     GET_TRANSACTIONS: "/users/transactions",
   },
+
+  ONBOARDING: {
+    SAVE_ANSWERS: "/users/questions/save-answers",
+    GET_USER_ANSWERS: "/users/questions/get-user-answers",
+    IS_ANSWERED: "/users/questions/isAnswered",
+  },
+
+  WITHDRAW: {
+    SEND_OTP: "/users/transactions/send-withdraw-otp",
+    CREATE_TRANSACTION: "/users/transactions/create-withdraw-transaction",
+    UPLOAD_PROOF: "/users/transactions/upload-withdraw-proof",
+  },
 };

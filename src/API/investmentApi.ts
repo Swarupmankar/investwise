@@ -98,7 +98,11 @@ export const investmentApi = baseApi.injectEndpoints({
           if (!it) return undefined;
 
           const amount = Number(String(it.amount ?? "0").replace(/,/g, ""));
-          const returns = Number(String(it.returns ?? "0").replace(/,/g, ""));
+          const thisMonthsReturnsRaw =
+            it.thisMonthsReturns ?? it.returns ?? "0";
+          const thisMonthsReturns = Number(
+            String(thisMonthsReturnsRaw).replace(/,/g, "")
+          );
           const createdAt = it.createdAt ? new Date(it.createdAt) : new Date();
           const updatedAt = it.updatedAt ? new Date(it.updatedAt) : createdAt;
           const { months, days } = parseDuration(it.duration);
@@ -113,7 +117,10 @@ export const investmentApi = baseApi.injectEndpoints({
             durationDays: days,
             duration: days,
             status: String(it.investmentStatus ?? "").toLowerCase(),
-            returns: Number.isFinite(returns) ? returns : 0,
+            returns: Number.isFinite(thisMonthsReturns) ? thisMonthsReturns : 0,
+            thisMonthsReturns: Number.isFinite(thisMonthsReturns)
+              ? thisMonthsReturns
+              : 0,
             lastReturnsRecieved: it.lastReturnsRecieved ?? null,
             userId: Number(it.userId ?? 0),
             createdAt,

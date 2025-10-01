@@ -15,15 +15,16 @@ export interface InvestmentPortfolio {
 export interface InvestmentRaw {
   id: number;
   name: string;
-  amount: string; 
-  forWhome?: string; 
+  amount: string;
+  forWhome?: string;
   duration: string;
-  investmentStatus: string; 
-  returns: string; 
+  investmentStatus: string;
+  returns: string;
+  thisMonthsReturns: string;
   lastReturnsRecieved?: string | null;
   userId: number;
-  createdAt: string; 
-  updatedAt: string; 
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface InvestmentNormalized {
@@ -31,17 +32,18 @@ export interface InvestmentNormalized {
   name: string;
   amount: number;
   forWhome?: string;
-  durationLabel: string; 
-  durationMonths: number; 
-  durationDays: number; 
-  duration: number; 
-  status: string; 
+  durationLabel: string;
+  durationMonths: number;
+  durationDays: number;
+  duration: number;
+  status: string;
   returns: number;
+  thisMonthsReturns?: number;
   lastReturnsRecieved?: string | null;
   userId: number;
   createdAt: Date;
   updatedAt: Date;
-  startDate: Date; 
+  startDate: Date;
   roi: number;
 }
 

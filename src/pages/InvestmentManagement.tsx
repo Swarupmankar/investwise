@@ -40,8 +40,11 @@ const normalizeId = (id: unknown): number | undefined => {
 const normalizeForUI = (raw: any) => {
   if (!raw) return undefined;
   const id = normalizeId(raw.id) ?? 0;
-  const amount = Number(raw.amount ?? raw.investedAmount ?? 0) || 0;
-  const roi = Number(raw.roi ?? raw.returnRate ?? 0) || 0;
+  const amount = Number(raw.amount ?? 0) || 0;
+  const thisMonthsReturns =
+    Number(
+      String(raw.thisMonthsReturns ?? raw.returns ?? "0").replace(/,/g, "")
+    ) || 0;
   const name = raw.name ?? raw.planName ?? `Investment #${id}`;
   const status = (raw.status ?? raw.investmentStatus ?? "")
     .toString()
@@ -54,9 +57,9 @@ const normalizeForUI = (raw: any) => {
     id,
     name,
     amount,
-    roi,
     status,
     createdAt,
+    thisMonthsReturns,
     updatedAt,
     startDate,
     userId: normalizeId(raw.userId) ?? 0,
@@ -207,7 +210,7 @@ export default function InvestmentManagement(): JSX.Element {
             <p className="text-muted-foreground mb-6">
               Please select an investment from the dashboard.
             </p>
-            <Button onClick={() => navigate("/dashboard")} className="w-full">
+            <Button onClick={() => navigate("/")} className="w-full">
               <ArrowLeft className="mr-2 h-4 w-4" />
               Back to Dashboard
             </Button>
@@ -260,20 +263,14 @@ export default function InvestmentManagement(): JSX.Element {
     }
 
     try {
-      // Call server-side close endpoint
       const resp = await closeInvestmentApi(invIdNum).unwrap();
-      // resp handling: assume success if no error thrown
       toast.success(
         "Investment closed successfully. Principal will be available in 15 days."
       );
-      // update local store action (if you still want to keep store changes)
       try {
         closeMatureInvestment(String(invIdNum));
-      } catch {
-        // store update is optional — ignore store errors
-      }
-      // navigate away or refetch
-      navigate("/dashboard");
+      } catch {}
+      navigate("/");
     } catch (err: any) {
       const msg =
         err?.data?.message ?? err?.message ?? "Failed to close investment";
@@ -370,17 +367,14 @@ export default function InvestmentManagement(): JSX.Element {
                   <div className="flex items-center justify-center gap-2 mb-1">
                     <TrendingUp className="h-4 w-4 text-success" />
                     <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                      Next Return
+                      Returns Earned
                     </p>
                   </div>
                   <p className="text-lg font-bold text-success">
-                    $
-                    {Math.round(
-                      (investment.amount * investment.roi) / 100
-                    ).toLocaleString()}
+                    ${investment.thisMonthsReturns.toLocaleString()}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    1st of next month
+                    Till now in a month
                   </p>
                 </div>
                 <div className="text-center space-y-2">

@@ -13,6 +13,8 @@ export interface WithdrawalItem {
   id: number;
   userId: number;
   amount: string;
+  userWallet: string;
+  txId: string | null;
   adminProofUrl?: string | null;
   userProofUrl?: string | null;
   status: string;

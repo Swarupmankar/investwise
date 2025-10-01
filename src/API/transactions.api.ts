@@ -6,7 +6,7 @@ import { GetTransactionsResponse } from "@/types/transctions/transactions.types"
 
 export const transactionsApi = baseApi.injectEndpoints({
   endpoints: (build) => ({
-    // GET ALL YTANSACTIOMS
+    // GET ALL TRANSACTIONS
     getTransactions: build.query<GetTransactionsResponse, void>({
       query: () => ({
         url: ENDPOINTS.TRANSACTIONS.GET_TRANSACTIONS,
@@ -22,7 +22,6 @@ export const transactionsApi = baseApi.injectEndpoints({
       query: (formData) => ({
         url: ENDPOINTS.TRANSACTIONS.CREATE_DEPOSIT,
         method: "POST",
-
         data: formData,
       }),
 

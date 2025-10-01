@@ -2,10 +2,10 @@
 
 export interface User {
   id: string;
-  walletBalance: number;           // Main USDT deposits
-  investmentWallet: number;        // Total actively invested amount
+  walletBalance: number; // Main USDT deposits
+  investmentWallet: number; // Total actively invested amount
   investmentReturnBalance: number; // Profits ready to withdraw
-  referralEarnings: number;        // Referral commissions
+  referralEarnings: number; // Referral commissions
   referralCode: string;
   referrerId?: string;
   questionnaireCompleted?: boolean;
@@ -32,7 +32,14 @@ export interface Withdrawal {
   userId: string;
   amount: number;
   source: "return" | "referral" | "principal";
-  status: "pending_admin_approval" | "admin_approved" | "verification_pending" | "approved" | "rejected" | "verification_failed";
+  status:
+    | "pending"
+    | "admin_approved"
+    | "client_verification_pending"
+    | "admin_review"
+    | "completed"
+    | "rejected"
+    | "verification_failed";
   walletAddress: string;
   transactionId?: string;
   requestDate: string;
@@ -40,6 +47,7 @@ export interface Withdrawal {
   verificationAttempts?: number;
   isBlocked?: boolean;
   screenshotUrl?: string;
+  adminProofUrl?: string;
   verificationStatus?: "pending" | "verified" | "failed";
   verificationDeadline?: string;
 }
@@ -47,7 +55,14 @@ export interface Withdrawal {
 export interface TransactionLog {
   id: string;
   userId: string;
-  type: "deposit" | "investment" | "return" | "referral" | "withdraw" | "close_investment" | "principal_processing";
+  type:
+    | "deposit"
+    | "investment"
+    | "return"
+    | "referral"
+    | "withdraw"
+    | "close_investment"
+    | "principal_processing";
   amount: number;
   date: string;
   status: "success" | "pending" | "rejected";

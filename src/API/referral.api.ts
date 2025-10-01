@@ -1,9 +1,9 @@
+// src/api/referral.api.ts
 import {
   ReferralCommissionHistoryResponse,
   ReferralStatsResponse,
 } from "@/types/referral/referral.types";
 import { baseApi } from "./baseApi";
-
 import { ENDPOINTS } from "@/constants/apiEndpoints";
 
 export const referralApi = baseApi.injectEndpoints({
@@ -24,7 +24,10 @@ export const referralApi = baseApi.injectEndpoints({
         const referral = {
           id: Number(referralRaw.id ?? 0),
           code: String(referralRaw.code ?? ""),
-          balance: Number(referralRaw.balance ?? 0),
+          balance:
+            referralRaw.balance !== undefined && referralRaw.balance !== null
+              ? String(referralRaw.balance)
+              : "0",
         };
 
         const stats = {
@@ -37,7 +40,7 @@ export const referralApi = baseApi.injectEndpoints({
           totalActiveInvestments: Number(statsRaw.totalActiveInvestments ?? 0),
         };
 
-        return { referral, stats } as unknown as ReferralStatsResponse;
+        return { referral, stats } as ReferralStatsResponse;
       },
     }),
 
@@ -47,13 +50,34 @@ export const referralApi = baseApi.injectEndpoints({
       void
     >({
       query: () => ({
-        url: ENDPOINTS.REFERRAL.COMMISSION_HISTORY, // e.g. "/users/referral/commssion-history"
+        url: ENDPOINTS.REFERRAL.COMMISSION_HISTORY,
         method: "GET",
       }),
       providesTags: [{ type: "Referral" as const, id: "HISTORY" }],
       transformResponse: (res: unknown) => {
         const payload = (res ?? {}) as any;
-        const items = Array.isArray(payload.items) ? payload.items : [];
+        const rawItems = Array.isArray(payload.items) ? payload.items : [];
+
+        // Normalize and ensure dates are strings (ISO), not Date objects
+        const items = rawItems.map((it: any) => ({
+          id: Number(it.id ?? 0),
+          userName: it.userName ? String(it.userName) : "",
+          userEmail: it.userEmail ? String(it.userEmail) : "",
+          investmentId: Number(it.investmentId ?? 0),
+          // keep amounts as strings
+          investmentAmount:
+            it.investmentAmount !== undefined && it.investmentAmount !== null
+              ? String(it.investmentAmount)
+              : "0",
+          // ensure date fields are strings (ISO); do NOT convert to Date here
+          dateInvestmentCreated: it.dateInvestmentCreated
+            ? String(it.dateInvestmentCreated)
+            : "",
+          createdAt: it.createdAt ? String(it.createdAt) : "",
+          status: it.status ? String(it.status) : "",
+          transactionType: it.transactionType ? String(it.transactionType) : "",
+        }));
+
         return { items } as ReferralCommissionHistoryResponse;
       },
     }),

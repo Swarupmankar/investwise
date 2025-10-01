@@ -1,5 +1,4 @@
-// src/pages/Transactions.tsx
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -28,6 +27,10 @@ import {
   Filter,
   Download,
   Bell,
+  Clock,
+  CheckCircle,
+  XCircle,
+  AlertCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useGetTransactionsQuery } from "@/API/transactions.api";
@@ -65,17 +68,77 @@ const getTypeColor = (type: string) => {
 };
 
 const getStatusColor = (status: string) => {
-  switch ((status || "").toLowerCase()) {
+  const statusLower = (status || "").toLowerCase();
+
+  switch (statusLower) {
     case "approved":
     case "success":
+    case "completed":
       return "bg-success/10 text-success border-success/20";
     case "pending":
+    case "processing":
+    case "admin_review":
+    case "client_verification_pending":
       return "bg-warning/10 text-warning border-warning/20";
     case "rejected":
     case "failed":
+    case "cancelled":
+    case "verification_failed":
       return "bg-destructive/10 text-destructive border-destructive/20";
     default:
       return "bg-muted text-muted-foreground border-border";
+  }
+};
+
+const getStatusIcon = (status: string) => {
+  const statusLower = (status || "").toLowerCase();
+
+  switch (statusLower) {
+    case "approved":
+    case "success":
+    case "completed":
+      return <CheckCircle className="h-3 w-3" />;
+    case "pending":
+    case "processing":
+    case "admin_review":
+    case "client_verification_pending":
+      return <Clock className="h-3 w-3" />;
+    case "rejected":
+    case "failed":
+    case "cancelled":
+    case "verification_failed":
+      return <XCircle className="h-3 w-3" />;
+    default:
+      return <AlertCircle className="h-3 w-3" />;
+  }
+};
+
+const formatStatusDisplay = (status: string) => {
+  const statusLower = (status || "").toLowerCase();
+
+  switch (statusLower) {
+    case "approved":
+      return "Approved";
+    case "pending":
+      return "Pending";
+    case "rejected":
+      return "Rejected";
+    case "processing":
+      return "Processing";
+    case "completed":
+      return "Completed";
+    case "failed":
+      return "Failed";
+    case "cancelled":
+      return "Cancelled";
+    case "admin_review":
+      return "Under Review";
+    case "client_verification_pending":
+      return "Awaiting Proof";
+    case "verification_failed":
+      return "Verification Failed";
+    default:
+      return status;
   }
 };
 
@@ -125,8 +188,10 @@ type ServerWithdraw = {
   id: number;
   userId: number;
   amount: string;
-  userProofUrl?: string | null;
+  userWallet: string;
+  txId: string | null;
   adminProofUrl?: string | null;
+  userProofUrl?: string | null;
   status: string;
   withdrawFrom?: string | null;
   createdAt: string;
@@ -137,11 +202,12 @@ type UnifiedTx = {
   id: string;
   kind: "deposit" | "withdrawal";
   amount: number;
-  txRef: string; // txId or proof url or id fallback
+  txRef: string;
   proofUrl?: string | null;
   status: string;
   createdAt: string | null;
-  source: string; // explicit source field for UI
+  source: string;
+  walletAddress?: string;
 };
 
 export default function TransactionHistory() {
@@ -149,7 +215,14 @@ export default function TransactionHistory() {
   const [typeFilter, setTypeFilter] = useState<
     "all" | "deposit" | "withdrawal"
   >("all");
+  const [statusFilter, setStatusFilter] = useState<
+    "all" | "pending" | "approved" | "rejected"
+  >("all");
   const [dateFilter, setDateFilter] = useState("all");
+
+  // pagination state
+  const [page, setPage] = useState(1);
+  const perPage = 10;
 
   const {
     data: resp,
@@ -164,8 +237,13 @@ export default function TransactionHistory() {
     const deposits: ServerDeposit[] = Array.isArray(resp?.deposits)
       ? resp!.deposits
       : [];
-    const withdrawls: ServerWithdraw[] = Array.isArray(resp?.withdrawls)
-      ? resp!.withdrawls
+
+    // Handle both spellings for backward compatibility
+    const withdrawals: ServerWithdraw[] = Array.isArray(
+      (resp as any)?.withdrawals || // Try correct spelling first
+        (resp as any)?.withdrawls // Fallback to typo spelling
+    )
+      ? (resp as any)?.withdrawals || (resp as any)?.withdrawls
       : [];
 
     // helper to map withdrawFrom -> human label
@@ -174,32 +252,9 @@ export default function TransactionHistory() {
       const key = String(raw).trim();
       const lower = key.toLowerCase();
       if (lower === "funds_available") return "Principal";
-      if (lower === "investment_returns" || lower === "investment_returns")
-        return "Returns";
-      if (lower === "investment_returns" || lower === "investment_returns")
-        return "Returns"; // defensive
-      if (lower === "investments_returns") return "Returns"; // defensive typo
-      if (lower === "investment_returns" || lower === "investments_returns")
-        return "Returns";
-      if (lower === "investment_returns" || lower === "investment_returns")
-        return "Returns";
       if (lower === "investment_returns") return "Returns";
-      if (
-        lower === "referral_earning" ||
-        lower === "referral_earnings" ||
-        lower === "referral_earning"
-      )
-        return "Referral";
       if (lower === "referral_earning" || lower === "referral_earnings")
         return "Referral";
-      if (lower === "referral_earning") return "Referral";
-      if (lower === "referral_earning") return "Referral";
-      if (lower === "referral_earning") return "Referral";
-      // handle some likely variants:
-      if (lower.includes("return")) return "Returns";
-      if (lower.includes("referral")) return "Referral";
-      if (lower === "wallet") return "Wallet";
-      // fallback: capitalize and replace underscores
       return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
     };
 
@@ -207,25 +262,26 @@ export default function TransactionHistory() {
       id: `deposit-${d.id}`,
       kind: "deposit",
       amount: Number(String(d.amount ?? "0").replace(/,/g, "")) || 0,
-      txRef: d.txId ?? "",
+      txRef: d.txId ?? `Deposit-${d.id}`,
       proofUrl: d.proofUrl ?? null,
-      status: String(d.status ?? "").toUpperCase(),
+      status: String(d.status ?? ""),
       createdAt: d.createdAt ?? d.updatedAt ?? null,
-      source: "Principal", // per requirement: deposits show Principal
+      source: "Wallet", // Deposits always show "Wallet" as source
     }));
 
-    const mappedWithdraws: UnifiedTx[] = withdrawls.map((w) => {
+    const mappedWithdraws: UnifiedTx[] = withdrawals.map((w) => {
       const rawFrom = w.withdrawFrom ?? "";
       const sourceLabel = mapWithdrawFromToLabel(rawFrom);
       return {
         id: `withdraw-${w.id}`,
         kind: "withdrawal",
         amount: Number(String(w.amount ?? "0").replace(/,/g, "")) || 0,
-        txRef: w.userProofUrl ?? w.adminProofUrl ?? String(w.id),
+        txRef: w.txId ?? `Withdrawal-${w.id}`,
         proofUrl: w.userProofUrl ?? w.adminProofUrl ?? null,
-        status: String(w.status ?? "").toUpperCase(),
+        status: String(w.status ?? ""),
         createdAt: w.createdAt ?? w.updatedAt ?? null,
         source: sourceLabel,
+        walletAddress: w.userWallet,
       };
     });
 
@@ -242,9 +298,43 @@ export default function TransactionHistory() {
   const filtered = useMemo(() => {
     const lower = searchTerm.trim().toLowerCase();
     return unified.filter((tx) => {
+      // Type filter
       if (typeFilter !== "all" && tx.kind !== typeFilter) return false;
 
-      // date filtering
+      // Status filter
+      if (statusFilter !== "all") {
+        const txStatus = tx.status.toLowerCase();
+        switch (statusFilter) {
+          case "pending":
+            if (
+              !txStatus.includes("pending") &&
+              txStatus !== "processing" &&
+              txStatus !== "admin_review" &&
+              txStatus !== "client_verification_pending"
+            )
+              return false;
+            break;
+          case "approved":
+            if (
+              !txStatus.includes("approved") &&
+              txStatus !== "completed" &&
+              txStatus !== "success"
+            )
+              return false;
+            break;
+          case "rejected":
+            if (
+              !txStatus.includes("rejected") &&
+              txStatus !== "failed" &&
+              txStatus !== "cancelled" &&
+              txStatus !== "verification_failed"
+            )
+              return false;
+            break;
+        }
+      }
+
+      // Date filtering
       if (dateFilter !== "all" && tx.createdAt) {
         const created = new Date(tx.createdAt);
         const now = new Date();
@@ -265,13 +355,35 @@ export default function TransactionHistory() {
         }
       }
 
+      // Search filter
       if (!lower) return true;
       if (String(tx.amount).toLowerCase().includes(lower)) return true;
-      if ((tx.txRef ?? "").toLowerCase().includes(lower)) return true;
       if ((tx.source ?? "").toLowerCase().includes(lower)) return true;
+      if ((tx.status ?? "").toLowerCase().includes(lower)) return true;
+      if (tx.walletAddress && tx.walletAddress.toLowerCase().includes(lower))
+        return true;
       return false;
     });
-  }, [unified, searchTerm, typeFilter, dateFilter]);
+  }, [unified, searchTerm, typeFilter, statusFilter, dateFilter]);
+
+  // reset page when filters/search change
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, typeFilter, statusFilter, dateFilter, resp]);
+
+  // derive pagination values
+  const totalItems = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / perPage));
+
+  // clamp page to valid range
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+    if (page < 1) setPage(1);
+  }, [page, totalPages]);
+
+  const startIndex = (page - 1) * perPage;
+  const endIndex = Math.min(startIndex + perPage, totalItems);
+  const paginated = filtered.slice(startIndex, endIndex);
 
   // skeleton count
   const skeletonCount = 6;
@@ -279,7 +391,9 @@ export default function TransactionHistory() {
   // export visible rows
   const handleExport = () => {
     if (!filtered || filtered.length === 0) return;
-    const rows = [["id", "kind", "amount", "source", "status", "createdAt"]];
+    const rows = [
+      ["ID", "Type", "Amount", "Source", "Status", "Date", "Wallet Address"],
+    ];
     filtered.forEach((r) =>
       rows.push([
         r.id,
@@ -287,7 +401,8 @@ export default function TransactionHistory() {
         String(r.amount),
         r.source,
         r.status,
-        String(r.createdAt),
+        r.createdAt ? formatDate(r.createdAt) : "—",
+        r.walletAddress || "—",
       ])
     );
     const csv = rows
@@ -297,12 +412,36 @@ export default function TransactionHistory() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `transactions_${new Date().toISOString()}.csv`;
+    a.download = `transactions_${new Date().toISOString().split("T")[0]}.csv`;
     document.body.appendChild(a);
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
   };
+
+  // small helper for rendering page button styling
+  const PageButton = ({
+    n,
+    active,
+    onClick,
+  }: {
+    n: number;
+    active?: boolean;
+    onClick: () => void;
+  }) => (
+    <button
+      aria-current={active ? "page" : undefined}
+      onClick={onClick}
+      className={cn(
+        "min-w-[36px] h-9 px-3 rounded-md border flex items-center justify-center text-sm",
+        active
+          ? "bg-background border-border shadow-sm font-semibold"
+          : "bg-transparent border-transparent hover:bg-muted/10"
+      )}
+    >
+      {n}
+    </button>
+  );
 
   return (
     <div className="space-y-6">
@@ -331,12 +470,12 @@ export default function TransactionHistory() {
       {/* Filters */}
       <Card className="card-premium">
         <CardContent className="p-6">
-          <div className="flex flex-col md:flex-row gap-4">
-            <div className="flex-1">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="lg:col-span-1">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Search by amount, source or tx id / proof..."
+                  placeholder="Search transactions..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pl-10"
@@ -348,20 +487,35 @@ export default function TransactionHistory() {
               value={typeFilter}
               onValueChange={(v) => setTypeFilter(v as any)}
             >
-              <SelectTrigger className="w-full md:w-48">
+              <SelectTrigger>
                 <Filter className="h-4 w-4 mr-2" />
-                <SelectValue placeholder="Filter by type" />
+                <SelectValue placeholder="Transaction Type" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All</SelectItem>
+                <SelectItem value="all">All Types</SelectItem>
                 <SelectItem value="deposit">Deposits</SelectItem>
                 <SelectItem value="withdrawal">Withdrawals</SelectItem>
               </SelectContent>
             </Select>
 
+            <Select
+              value={statusFilter}
+              onValueChange={(v) => setStatusFilter(v as any)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Status</SelectItem>
+                <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="approved">Approved</SelectItem>
+                <SelectItem value="rejected">Rejected</SelectItem>
+              </SelectContent>
+            </Select>
+
             <Select value={dateFilter} onValueChange={setDateFilter}>
-              <SelectTrigger className="w-full md:w-48">
-                <SelectValue placeholder="Filter by date" />
+              <SelectTrigger>
+                <SelectValue placeholder="Date Range" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Time</SelectItem>
@@ -380,7 +534,8 @@ export default function TransactionHistory() {
         <CardHeader>
           <CardTitle className="text-foreground">Transactions</CardTitle>
           <p className="text-muted-foreground">
-            Showing {filtered.length} item(s)
+            Showing {filtered.length} transaction(s) • Page {page} of{" "}
+            {totalPages}
           </p>
         </CardHeader>
 
@@ -429,70 +584,130 @@ export default function TransactionHistory() {
               {filtered.length === 0 ? (
                 <EmptyCard
                   title="No matching transactions"
-                  message="Try a different search or date filter."
+                  message="Try a different search or filter combination."
                 />
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Amount</TableHead>
-                      <TableHead>Source</TableHead>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filtered.map((t) => (
-                      <TableRow key={t.id} className="hover:bg-muted/50">
-                        <TableCell>
-                          <div className="flex items-center gap-3">
-                            {getTypeIcon(t.kind)}
-                            <div>
-                              <Badge
-                                className={cn("border", getTypeColor(t.kind))}
+                <>
+                  <div className="rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Type</TableHead>
+                          <TableHead>Amount</TableHead>
+                          <TableHead>Source</TableHead>
+                          <TableHead>Date & Time</TableHead>
+                          <TableHead>Status</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {paginated.map((t) => (
+                          <TableRow key={t.id} className="hover:bg-muted/50">
+                            <TableCell>
+                              <div className="flex items-center gap-3">
+                                {getTypeIcon(t.kind)}
+                                <div>
+                                  <Badge
+                                    className={cn(
+                                      "border",
+                                      getTypeColor(t.kind)
+                                    )}
+                                  >
+                                    {t.kind === "deposit"
+                                      ? "Deposit"
+                                      : "Withdrawal"}
+                                  </Badge>
+                                </div>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <p
+                                className={cn(
+                                  "font-bold text-lg",
+                                  t.kind === "deposit"
+                                    ? "text-success"
+                                    : "text-warning"
+                                )}
                               >
-                                {t.kind === "deposit"
-                                  ? "Deposit"
-                                  : "Withdrawal"}
+                                {t.kind === "deposit" ? "+" : "-"}$
+                                {t.amount.toLocaleString()}
+                              </p>
+                            </TableCell>
+                            <TableCell>
+                              <div>
+                                <p className="text-foreground font-medium">
+                                  {t.source}
+                                </p>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <p className="text-foreground font-medium">
+                                {t.createdAt ? formatDate(t.createdAt) : "—"}
+                              </p>
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                className={cn(
+                                  "border flex items-center gap-1 w-fit",
+                                  getStatusColor(t.status)
+                                )}
+                              >
+                                {getStatusIcon(t.status)}
+                                {formatStatusDisplay(t.status)}
                               </Badge>
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <p
-                            className={cn(
-                              "font-bold",
-                              t.kind === "deposit"
-                                ? "text-success"
-                                : "text-warning"
-                            )}
-                          >
-                            {t.kind === "deposit" ? "+" : "-"}$
-                            {t.amount.toLocaleString()}
-                          </p>
-                        </TableCell>
-                        <TableCell>
-                          <p className="text-muted-foreground text-sm truncate max-w-[220px]">
-                            {t.source || "—"}
-                          </p>
-                        </TableCell>
-                        <TableCell>
-                          <p className="text-foreground">
-                            {t.createdAt ? formatDate(t.createdAt) : "—"}
-                          </p>
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            className={cn("border", getStatusColor(t.status))}
-                          >
-                            {t.status}
-                          </Badge>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  {/* Pagination control */}
+                  {totalPages > 1 && (
+                    <>
+                      <div className="mt-6 flex items-center justify-center gap-3">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setPage((p) => Math.max(1, p - 1))}
+                          disabled={page === 1}
+                        >
+                          ‹ Previous
+                        </Button>
+
+                        <div className="flex items-center gap-2">
+                          {Array.from(
+                            { length: totalPages },
+                            (_, i) => i + 1
+                          ).map((n) => (
+                            <PageButton
+                              key={n}
+                              n={n}
+                              active={n === page}
+                              onClick={() => setPage(n)}
+                            />
+                          ))}
+                        </div>
+
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            setPage((p) => Math.min(totalPages, p + 1))
+                          }
+                          disabled={page === totalPages}
+                        >
+                          Next ›
+                        </Button>
+                      </div>
+
+                      {/* small summary under pagination */}
+                      <div className="mt-4 text-center text-sm text-muted-foreground">
+                        Showing {startIndex + 1}-{endIndex} of {totalItems}{" "}
+                        transactions
+                      </div>
+                    </>
+                  )}
+                </>
               )}
             </>
           )}
