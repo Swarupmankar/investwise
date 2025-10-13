@@ -1,3 +1,4 @@
+// src/pages/Withdraw.tsx
 import { useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -40,10 +41,12 @@ import WithdrawalVerification from "@/components/WithdrawalVerification";
 
 /**
  * Helper: generate options for select (keeps your original increments)
+ * Updated to make minimum withdrawal $500 and show increments >= 500
  */
 const generateWithdrawalOptions = (balance: number) => {
   const options: { value: string; label: string }[] = [];
-  const increments = [50, 100, 250, 500, 1000, 2500, 5000];
+  // only show increments that are >= the minimum withdrawal (500)
+  const increments = [500, 1000, 2500, 5000];
 
   for (const inc of increments) {
     if (inc <= balance)
@@ -53,7 +56,8 @@ const generateWithdrawalOptions = (balance: number) => {
       });
   }
 
-  if (balance > 10)
+  // show full balance as "Max Available" only if it's above the minimum
+  if (balance > 500)
     options.push({
       value: balance.toString(),
       label: `$${balance.toLocaleString()} (Max Available)`,
@@ -122,8 +126,20 @@ const getStatusIcon = (statusRaw: string) => {
 };
 
 /**
+ * Lightweight TRC20 (Tron) address validator (client-side)
+ * TRC20 addresses typically start with 'T' and are 34 chars (base58).
+ * This checks the basic structure (client-side sanity check).
+ */
+const isValidTrc20Address = (addr: string) => {
+  if (!addr || typeof addr !== "string") return false;
+  // Basic pattern: starts with T, total length 34, alphanumeric (base58 includes other chars but this is permissive enough).
+  const re = /^T[a-zA-Z0-9]{33}$/;
+  return re.test(addr.trim());
+};
+
+/**
  * WithdrawalForm component (keeps your original form/flow)
- * Only minor wiring (same as your original).
+ * Added real-time TRC20 validation and minimum withdrawal checks (500).
  */
 const WithdrawalForm = ({
   title,
@@ -192,8 +208,11 @@ const WithdrawalForm = ({
   const step = currentStep[formType];
 
   const handleSendOTP = async () => {
+    // enforce minimum and address validity before sending OTP
     if (!amount || parseFloat(amount) <= 0) return;
     if (parseFloat(amount) > balance) return;
+    if (parseFloat(amount) < 500) return;
+    if (!address || !isValidTrc20Address(address)) return;
     await onSendOTP();
   };
 
@@ -260,14 +279,44 @@ const WithdrawalForm = ({
             <>
               <div className="space-y-2">
                 <Label>USDT Wallet Address (TRC20)</Label>
-                <Input
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  placeholder="Enter your USDT wallet address"
-                  className="font-mono text-sm"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Ensure this is a valid TRC20 USDT address
+
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={address}
+                    onChange={(e) => setAddress(e.target.value)}
+                    placeholder="Enter your USDT wallet address"
+                    className="font-mono text-sm"
+                    aria-invalid={
+                      address ? !isValidTrc20Address(address) : undefined
+                    }
+                  />
+                  {/* validation icon: green check if valid, red X if invalid and non-empty */}
+                  <div aria-hidden>
+                    {address ? (
+                      isValidTrc20Address(address) ? (
+                        <CheckCircle className="h-5 w-5 text-success" />
+                      ) : (
+                        <XCircle className="h-5 w-5 text-destructive" />
+                      )
+                    ) : null}
+                  </div>
+                </div>
+
+                <p
+                  className={
+                    "text-xs " +
+                    (address
+                      ? isValidTrc20Address(address)
+                        ? "text-success"
+                        : "text-destructive"
+                      : "text-muted-foreground")
+                  }
+                >
+                  {address
+                    ? isValidTrc20Address(address)
+                      ? "Valid TRC20 address"
+                      : "Invalid TRC20 address — should start with 'T' and be 34 characters."
+                    : "Ensure this is a valid TRC20 USDT address"}
                 </p>
               </div>
 
@@ -334,7 +383,7 @@ const WithdrawalForm = ({
                     )}
 
                     <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>Minimum: $10</span>
+                      <span>Minimum: $500</span>
                       <span>Available: ${balance.toLocaleString()}</span>
                     </div>
                   </>
@@ -346,9 +395,10 @@ const WithdrawalForm = ({
                 disabled={
                   isLoadingBalance ||
                   !address ||
+                  !isValidTrc20Address(address) ||
                   !amount ||
                   parseFloat(amount) > balance ||
-                  parseFloat(amount) < 10
+                  parseFloat(amount) < 500
                 }
                 onClick={handleContinueTo2FA}
               >
@@ -583,10 +633,10 @@ export default function Withdraw() {
       });
       return;
     }
-    if (requestedAmount < 10) {
+    if (requestedAmount < 500) {
       toast({
         title: "Minimum Amount Required",
-        description: "Minimum withdrawal amount is $10",
+        description: "Minimum withdrawal amount is $500",
         variant: "destructive",
       });
       return;
@@ -682,18 +732,6 @@ export default function Withdraw() {
     }
   };
 
-  /**
-   * Verification endpoint: used both for admin actions and for marking client_uploaded
-   * Accepts action = "admin_approve" | "client_uploaded" | "reject"
-   *
-   * Backend must map these actions to the canonical statuses:
-   * - "admin_approve" -> ADMIN_PROOF_UPLOADED (or APPROVED if admin finalizes)
-   * - "client_uploaded" -> REVIEW
-   * - "approve_final" -> APPROVED
-   * - "reject" -> REJECTED
-   *
-   * Here we call generic /verify endpoint — update payload as per your backend.
-   */
   const completeWithdrawalVerification = async (
     withdrawalId: string,
     action: "admin_approved" | "client_uploaded" | "reject" | "approve_final"
@@ -738,18 +776,15 @@ export default function Withdraw() {
     withdrawalId: string,
     file?: File
   ) => {
-    // If you want to simulate admin uploading an image, call a dedicated admin upload route; here we call verify action for admin_approved
     return completeWithdrawalVerification(withdrawalId, "admin_approved");
   };
 
   /**
    * Build withdrawalTransaction list from transactionsData returned by API.
-   * We normalize fields and pull adminProofUrl & screenshotUrl from common field names.
    */
   const withdrawalTransactions = useMemo(() => {
     if (!transactionsData) return [];
 
-    // try common roots
     const rawArr =
       (transactionsData as any)?.withdrawals ??
       (transactionsData as any)?.withdrawls ??
@@ -758,7 +793,6 @@ export default function Withdraw() {
       [];
 
     return (rawArr as any[]).map((w: any) => {
-      // normalize status and urls with fallbacks
       const statusRaw = (
         w.status ??
         w.transactionStatus ??
@@ -781,7 +815,6 @@ export default function Withdraw() {
       const updatedAt = w.updatedAt ?? w.processedAt ?? w.approvedAt ?? null;
       const createdAt = w.createdAt ?? w.requestedAt ?? null;
 
-      // return normalized object used by UI (keeps original fields so your WithdrawalVerification continues to work)
       return {
         id: String(
           w.id ??
@@ -800,11 +833,11 @@ export default function Withdraw() {
           return withdrawFrom || "—";
         })(),
         rawStatus: statusRaw,
-        status: (statusRaw || "").toUpperCase(), // keep uppercase for matching backend types
+        status: (statusRaw || "").toUpperCase(),
         walletAddress: w.userWallet ?? w.wallet ?? "—",
         requestDate: createdAt ? formatDate(createdAt) : "—",
         processedDate: updatedAt ? formatDate(updatedAt) : null,
-        updatedAtRaw: updatedAt, // used for 1-day logic
+        updatedAtRaw: updatedAt,
         adminProofUrl,
         screenshotUrl,
         rawData: w,
@@ -812,38 +845,21 @@ export default function Withdraw() {
     });
   }, [transactionsData]);
 
-  /**
-   * Active / history classification according to your requested flow and backend types:
-   *
-   * backend types (exact): PENDING, ADMIN_PROOF_UPLOADED, REVIEW, APPROVED, REJECTED
-   *
-   * Active (show in Verification area):
-   *  - PENDING
-   *  - ADMIN_PROOF_UPLOADED (admin has uploaded proof -> show admin proof + show client upload UI)
-   *  - REVIEW (admin is reviewing client's uploaded proof)
-   *  - APPROVED *for 24 hours* (show completed UI for 1 day)
-   *
-   * History:
-   *  - REJECTED
-   *  - APPROVED older than 24 hours
-   */
   const ACTIVE_STATUSES = ["PENDING", "ADMIN_PROOF_UPLOADED", "REVIEW"];
   const isRecentlyApproved = (t: any) => {
     if (!t || t.status !== "APPROVED") return false;
-    // use updatedAtRaw if available, else processedDate fallback
     const when =
       t.updatedAtRaw ?? t.rawData?.updatedAt ?? t.rawData?.approvedAt ?? null;
-    if (!when) return true; // if backend didn't provide a timestamp, show it for 24h by default
+    if (!when) return true;
     try {
       const then = new Date(when).getTime();
       const now = Date.now();
-      return now - then < 24 * 60 * 60 * 1000; // less than 24 hours
+      return now - then < 24 * 60 * 60 * 1000;
     } catch {
       return true;
     }
   };
 
-  // helpers to get lists by source
   const getWithdrawalsBySource = (
     sourceType: "return" | "referral" | "principal"
   ) => {
@@ -854,11 +870,6 @@ export default function Withdraw() {
     return withdrawalTransactions.filter((t) => t.source === "Principal");
   };
 
-  /**
-   * WithdrawalHistory component: shows pending (active) verifications first (if any) and historical list separately.
-   * - When status === ADMIN_PROOF_UPLOADED, we ensure adminProofUrl is available in the withdrawal object so WithdrawalVerification can show it.
-   * - Client upload is done by calling onUploadScreenshot; backend should set status to REVIEW and refetch will pick it up.
-   */
   const WithdrawalHistory = ({
     withdrawals,
     type,
@@ -869,19 +880,17 @@ export default function Withdraw() {
     const [currentPage, setCurrentPage] = useState(1);
     const [itemsPerPage, setItemsPerPage] = useState(5);
 
-    // active = PENDING | ADMIN_PROOF_UPLOADED | REVIEW | APPROVED (recent)
     const pendingVerifications = withdrawals.filter((w) => {
       if (!w || !w.status) return false;
       if (w.status === "APPROVED") return isRecentlyApproved(w);
       return ACTIVE_STATUSES.includes(w.status);
     });
 
-    // historical = REJECTED OR APPROVED older than 24 hours
     const historicalWithdrawals = withdrawals.filter((w) => {
       if (!w || !w.status) return false;
       if (w.status === "REJECTED") return true;
       if (w.status === "APPROVED") return !isRecentlyApproved(w);
-      return false; // everything else considered active
+      return false;
     });
 
     const totalPages = Math.ceil(historicalWithdrawals.length / itemsPerPage);
@@ -891,18 +900,15 @@ export default function Withdraw() {
       startIndex + itemsPerPage
     );
 
-    // count of client uploads required (ADMIN_PROOF_UPLOADED with no screenshot)
     const pendingUploadsCount = pendingVerifications.filter(
       (w) => w.status === "ADMIN_PROOF_UPLOADED" && !w.screenshotUrl
     ).length;
 
     return (
       <div className="space-y-4">
-        {/* Pending / active verification blocks (only if present) */}
         {pendingVerifications.length > 0 &&
           pendingVerifications.map((withdrawal) => (
             <div key={withdrawal.id} className="mb-4">
-              {/* If admin proof exists, show the admin proof image above the verification component so user sees it */}
               {withdrawal.status === "ADMIN_PROOF_UPLOADED" &&
                 withdrawal.adminProofUrl && (
                   <Card className="mb-3">
@@ -927,7 +933,6 @@ export default function Withdraw() {
                       </div>
 
                       <div className="mt-3">
-                        {/* adminProofUrl might be a full URL; render image if it looks like one */}
                         <img
                           src={withdrawal.adminProofUrl}
                           alt="Admin proof"
@@ -938,7 +943,6 @@ export default function Withdraw() {
                   </Card>
                 )}
 
-              {/* WithdrawalVerification component is your original component — we pass normalized withdrawal data + handlers */}
               <WithdrawalVerification
                 key={withdrawal.id}
                 withdrawal={withdrawal}
@@ -957,8 +961,6 @@ export default function Withdraw() {
                     | "approve_final"
                     | "reject"
                 ) => {
-                  // map to backend action names per your backend's verify endpoint contract
-                  // here we pass action straight through — backend should map appropriately
                   const res = await completeWithdrawalVerification(
                     withdrawal.id,
                     action === "admin_approved"
@@ -973,14 +975,12 @@ export default function Withdraw() {
                   return res;
                 }}
                 pendingUploadsCount={pendingUploadsCount}
-                // expose simulate helpers if your verification UI uses them for dev/testing
                 simulateAdminApproval={simulateAdminUploadProof}
                 simulateClientScreenshotUpload={uploadWithdrawalScreenshot}
               />
             </div>
           ))}
 
-        {/* Historical card */}
         <Card className="card-premium">
           <CardHeader>
             <div className="flex items-center justify-between">

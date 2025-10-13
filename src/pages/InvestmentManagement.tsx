@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { format } from "date-fns";
+import { format, differenceInCalendarDays } from "date-fns";
 import {
   useGetInvestmentQuery,
   useCloseInvestmentMutation,
@@ -71,6 +71,82 @@ const firstOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1);
 const firstOfNextMonth = (d: Date) =>
   new Date(d.getFullYear(), d.getMonth() + 1, 1);
 const lastOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
+
+/**
+ * computeMonthlyCycle logic:
+ * - If startDate is in the same year & month as "now" => start from the actual startDate,
+ *   maturity is the 1st of the next month after that startDate's month.
+ * - Otherwise fallback to first of current month -> first of next month.
+ * - Returns: { startOfCycle, maturityDate, daysInThisMonth, daysCompleted, daysRemaining, totalDays, progressPct, isFirstOfMonthToday }
+ */
+const computeMonthlyCycle = (startDateCandidate?: Date) => {
+  const now = new Date();
+
+  const startOfThisMonth = firstOfMonth(now);
+  const firstOfNext = firstOfNextMonth(now);
+
+  let parsedStart: Date | null = null;
+  if (
+    startDateCandidate instanceof Date &&
+    !Number.isNaN(startDateCandidate.getTime())
+  ) {
+    parsedStart = new Date(
+      startDateCandidate.getFullYear(),
+      startDateCandidate.getMonth(),
+      startDateCandidate.getDate()
+    );
+  }
+
+  let startOfCycle: Date;
+  let maturityDate: Date;
+
+  if (
+    parsedStart &&
+    parsedStart.getFullYear() === now.getFullYear() &&
+    parsedStart.getMonth() === now.getMonth()
+  ) {
+    // created in current month: start from creation date, mature on 1st of next month after creation month
+    startOfCycle = parsedStart;
+    maturityDate = firstOfNextMonth(startOfCycle);
+  } else {
+    // fallback: first of current month -> first of next month
+    startOfCycle = startOfThisMonth;
+    maturityDate = firstOfNext;
+  }
+
+  // total days in the counted cycle (calendar days)
+  let totalDays = differenceInCalendarDays(maturityDate, startOfCycle);
+  if (totalDays <= 0) totalDays = 1;
+
+  // days completed from startOfCycle up to today (clamped)
+  let daysCompleted = differenceInCalendarDays(
+    now < maturityDate ? now : maturityDate,
+    startOfCycle
+  );
+  if (daysCompleted < 0) daysCompleted = 0;
+  if (daysCompleted > totalDays) daysCompleted = totalDays;
+
+  // days remaining until maturity (clamped)
+  let daysRemaining = differenceInCalendarDays(maturityDate, now);
+  if (daysRemaining < 0) daysRemaining = 0;
+
+  // days in calendar month for display (use the current month length)
+  const daysInThisMonth = lastOfMonth(now).getDate();
+
+  const progressPct = (daysCompleted / totalDays) * 100;
+
+  return {
+    startOfCycle,
+    maturityDate,
+    daysInThisMonth,
+    daysCompleted,
+    daysRemaining,
+    totalDays,
+    progressPct: Math.max(0, Math.min(100, progressPct)),
+    progressRounded: Math.round(Math.max(0, Math.min(100, progressPct))),
+    isFirstOfMonthToday: now.getDate() === 1,
+  };
+};
 
 /** Component **/
 export default function InvestmentManagement(): JSX.Element {
@@ -223,20 +299,16 @@ export default function InvestmentManagement(): JSX.Element {
   // uiInvestment is defined
   const investment = uiInvestment as ReturnType<typeof normalizeForUI>;
 
-  // --- Monthly cycle logic based on today's date ---
-  const now = new Date();
-  const cycleStart = firstOfMonth(now); // current month 1st
-  const maturityDate = firstOfNextMonth(now); // NEXT month 1st (always rolls each month)
-  const endThisMonth = lastOfMonth(now);
-  const daysInThisMonth = endThisMonth.getDate();
-  const daysCompleted = Math.max(0, now.getDate() - 1); // 0 on the 1st
-  const daysRemaining = Math.ceil(
-    (maturityDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
-  );
-  const progressPct = (daysCompleted / daysInThisMonth) * 100;
+  // --- Monthly cycle logic based on investment.startDate (fix) ---
+  const cycle = computeMonthlyCycle(investment.startDate);
 
-  // Close is ONLY allowed on the 1st of the month (00:00–23:59)
-  const isFirstOfMonthToday = now.getDate() === 1;
+  const daysInThisMonth = cycle.daysInThisMonth;
+  const daysCompleted = cycle.daysCompleted;
+  const daysRemaining = cycle.daysRemaining;
+  const progressPct = cycle.progressPct;
+  const progressRounded = cycle.progressRounded;
+  const maturityDate = cycle.maturityDate;
+  const isFirstOfMonthToday = cycle.isFirstOfMonthToday;
 
   const getStatusBadge = (status: string) => {
     const variants: Record<string, string> = {
@@ -417,7 +489,7 @@ export default function InvestmentManagement(): JSX.Element {
                   <p className="text-2xl font-bold text-blue-600">
                     {daysCompleted}
                   </p>
-                  <p className="text-xs text-blue-600/80">this month</p>
+                  <p className="text-xs text-blue-600/80">this cycle</p>
                 </div>
 
                 <div className="bg-orange-500/10 border border-orange-500/20 rounded-lg p-4 space-y-2">
@@ -438,7 +510,7 @@ export default function InvestmentManagement(): JSX.Element {
 
               <div className="space-y-3">
                 <div className="relative">
-                  <Progress value={progressPct} className="h-3" />
+                  <Progress value={Math.round(progressPct)} className="h-3" />
                 </div>
 
                 <div className="grid grid-cols-2 gap-4 text-xs">
@@ -464,13 +536,13 @@ export default function InvestmentManagement(): JSX.Element {
                   <div className="flex items-center gap-2">
                     <div className="w-3 h-3 bg-primary rounded-full" />
                     <span className="text-xs text-muted-foreground">
-                      Completed: {progressPct.toFixed(0)}%
+                      Completed: {progressRounded}%
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="w-3 h-3 bg-muted/50 rounded-full border border-border" />
                     <span className="text-xs text-muted-foreground">
-                      Remaining: {(100 - progressPct).toFixed(0)}%
+                      Remaining: {100 - progressRounded}%
                     </span>
                   </div>
                 </div>

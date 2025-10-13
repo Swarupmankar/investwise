@@ -31,7 +31,10 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useToast } from "@/hooks/use-toast";
 import { Eye, EyeOff, Mail, Lock } from "lucide-react";
 import { login } from "@/API/auth.api";
-// ← adjust import path to where your slice exports `login`
+import {
+  useSendForgetPasswordOtpMutation,
+  useResetPasswordUsingOtpMutation,
+} from "@/API/pass.api"; // adjust path if needed
 
 const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
@@ -43,20 +46,29 @@ const Login = () => {
   const [forgotStep, setForgotStep] = useState<"email" | "otp" | "reset">(
     "email"
   );
+
+  // keep the email that was used to request OTP
+  const [forgotEmail, setForgotEmail] = useState("");
   const [otp, setOtp] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmNewPassword, setShowConfirmNewPassword] = useState(false);
 
-  // Redux
-  const dispatch: any = useDispatch(); // replace `any` with AppDispatch / typed hook if available
-  const auth = useSelector((state: any) => state.auth); // replace `any` with RootState / typed hook if available
+  // RTK Query mutations
+  const [sendOtp, { isLoading: sendingOtp }] =
+    useSendForgetPasswordOtpMutation();
+  const [resetPasswordUsingOtp, { isLoading: resettingPassword }] =
+    useResetPasswordUsingOtpMutation();
+
+  // Redux (typed hooks recommended)
+  const dispatch: any = useDispatch();
+  const auth = useSelector((state: any) => state.auth);
   const { isLoading, isError, error, isAuthenticated, user } = auth || {};
 
   const navigate = useNavigate();
 
-  // react-hook-form for forgot password modal
+  // react-hook-form for forgot password modal (email step)
   const forgotSchema = z.object({
     email: z.string().email("Please enter a valid email address"),
   });
@@ -67,12 +79,13 @@ const Login = () => {
     handleSubmit: handleForgotSubmit,
     formState: { errors, isSubmitting },
     reset,
+    getValues,
   } = useForm<ForgotInputs>({
     resolver: zodResolver(forgotSchema),
     defaultValues: { email: "" },
   });
 
-  // Handle login side effects (success/error)
+  // Show login error toasts only when login actually errored
   useEffect(() => {
     if (isError && error) {
       toast({
@@ -92,24 +105,40 @@ const Login = () => {
         title: "Signed in",
         description: `Welcome back${user?.name ? `, ${user.name}` : ""}!`,
       });
-      // navigate to protected area; adjust route as needed
       navigate("/dashboard");
     }
   }, [isAuthenticated, navigate, toast, user]);
 
-  // Forgot password flow handlers (kept as before)
+  // --- Forgot password handlers ---
+
+  // 1) Send OTP and persist the email used to request OTP
   const onForgotSubmit = async (data: ForgotInputs) => {
-    console.log("Forgot password request:", data);
-    toast({
-      title: "Verification code sent",
-      description: "Enter the 6-digit code we sent to your email.",
-    });
-    setForgotStep("otp");
+    const requestedEmail = data.email;
+    try {
+      await sendOtp({ email: requestedEmail }).unwrap();
+      setForgotEmail(requestedEmail);
+      toast({
+        title: "Verification code sent",
+        description: `A 6-digit code was sent to ${requestedEmail}.`,
+      });
+      setForgotStep("otp");
+    } catch (err: any) {
+      toast({
+        title: "Failed to send code",
+        description:
+          err?.data?.message ||
+          err?.message ||
+          "Unable to send verification code. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
+  // 2) client-side OTP check (server validates on reset)
   const onVerifyOtp = (e: React.FormEvent) => {
     e.preventDefault();
-    if (otp.length !== 6) {
+    e.stopPropagation(); // defensive
+    if (otp.trim().length !== 6) {
       toast({
         title: "Invalid code",
         description: "Please enter the 6-digit code.",
@@ -120,8 +149,41 @@ const Login = () => {
     setForgotStep("reset");
   };
 
-  const onResetPassword = (e: React.FormEvent) => {
+  // resend code: prefer the actual email used to request OTP, otherwise fallbacks
+  const handleResendCode = async () => {
+    const targetEmail = forgotEmail || getValues("email") || email;
+    if (!targetEmail) {
+      toast({
+        title: "No email",
+        description: "Please enter your email first.",
+        variant: "destructive",
+      });
+      return;
+    }
+    try {
+      await sendOtp({ email: targetEmail }).unwrap();
+      setForgotEmail(targetEmail);
+      toast({
+        title: "Code resent",
+        description: `We sent another code to ${targetEmail}.`,
+      });
+    } catch (err: any) {
+      toast({
+        title: "Failed to resend",
+        description:
+          err?.data?.message ||
+          err?.message ||
+          "Unable to resend code. Please try again later.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // 3) Reset password — ensure we send { email, otp, newPassword } (API maps password too)
+  const onResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
+    e.stopPropagation();
+
     if (newPassword.length < 8) {
       toast({
         title: "Password too short",
@@ -138,16 +200,55 @@ const Login = () => {
       });
       return;
     }
-    toast({
-      title: "Password updated",
-      description: "You can now sign in with your new password.",
-    });
-    setForgotOpen(false);
-    setForgotStep("email");
-    setOtp("");
-    setNewPassword("");
-    setConfirmNewPassword("");
-    reset();
+
+    const emailToSend = forgotEmail || getValues("email") || email;
+    if (!emailToSend) {
+      toast({
+        title: "Missing email",
+        description: "Email is required to reset the password.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (otp.trim().length !== 6) {
+      toast({
+        title: "Invalid code",
+        description: "Enter the 6-digit verification code.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      await resetPasswordUsingOtp({
+        email: emailToSend,
+        otp,
+        newPassword,
+      }).unwrap();
+
+      toast({
+        title: "Password updated",
+        description: "You can now sign in with your new password.",
+      });
+
+      // reset modal state
+      setForgotOpen(false);
+      setForgotStep("email");
+      setOtp("");
+      setNewPassword("");
+      setConfirmNewPassword("");
+      setForgotEmail("");
+      reset();
+    } catch (err: any) {
+      toast({
+        title: "Failed to update password",
+        description:
+          err?.data?.message ||
+          err?.message ||
+          "Unable to update password. Please check the code and try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   // Main submit: dispatch login thunk
@@ -163,11 +264,8 @@ const Login = () => {
     }
 
     try {
-      // your thunk expects { username, password } — adapt if it's { email, password }
       await dispatch(login({ email, password })).unwrap();
-      // navigation and success toast happen in useEffect when isAuthenticated changes
     } catch (err: any) {
-      // thunk rejection also triggers isError; show fallback toast here as well
       const msg =
         err?.message || (typeof err === "string" ? err : "Login failed");
       toast({
@@ -175,7 +273,6 @@ const Login = () => {
         description: msg,
         variant: "destructive",
       });
-      // Optionally clear password field
       setPassword("");
     }
   };
@@ -188,6 +285,7 @@ const Login = () => {
           <CardDescription>Sign in to your account to continue</CardDescription>
         </CardHeader>
         <CardContent>
+          {/* LOGIN FORM */}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
@@ -237,226 +335,264 @@ const Login = () => {
             <Button type="submit" className="w-full" disabled={isLoading}>
               {isLoading ? "Signing in..." : "Sign In"}
             </Button>
+          </form>
 
-            <div className="text-center text-sm">
-              <Dialog
-                open={forgotOpen}
-                onOpenChange={(open) => {
-                  setForgotOpen(open);
-                  if (!open) {
-                    setForgotStep("email");
-                    setOtp("");
-                    setNewPassword("");
-                    setConfirmNewPassword("");
-                  }
-                }}
-              >
-                <DialogTrigger asChild>
-                  <Button variant="link" className="p-0 h-auto font-normal">
-                    Forgot your password?
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    {forgotStep === "email" && (
-                      <>
-                        <DialogTitle>Reset your password</DialogTitle>
-                        <DialogDescription>
-                          Enter your email address to receive a verification
-                          code.
-                        </DialogDescription>
-                      </>
-                    )}
-                    {forgotStep === "otp" && (
-                      <>
-                        <DialogTitle>Enter verification code</DialogTitle>
-                        <DialogDescription>
-                          We sent a 6-digit code to your email. Enter it below
-                          to continue.
-                        </DialogDescription>
-                      </>
-                    )}
-                    {forgotStep === "reset" && (
-                      <>
-                        <DialogTitle>Create a new password</DialogTitle>
-                        <DialogDescription>
-                          Set a strong password you haven't used before.
-                        </DialogDescription>
-                      </>
-                    )}
-                  </DialogHeader>
+          {/* FORGOT PASSWORD DIALOG - moved OUTSIDE the login form */}
+          <div className="text-center text-sm mt-3">
+            <Dialog
+              open={forgotOpen}
+              onOpenChange={(open) => {
+                setForgotOpen(open);
+                if (open) {
+                  // Prefill forgot-email with login email when modal opens
+                  reset({ email: email ?? "" });
+                } else {
+                  // Reset modal when closing
+                  setForgotStep("email");
+                  setOtp("");
+                  setNewPassword("");
+                  setConfirmNewPassword("");
+                  setForgotEmail("");
+                  reset();
+                }
+              }}
+            >
+              <DialogTrigger asChild>
+                <Button
+                  type="button"
+                  variant="link"
+                  className="p-0 h-auto font-normal"
+                >
+                  Forgot your password?
+                </Button>
+              </DialogTrigger>
 
+              <DialogContent>
+                <DialogHeader>
                   {forgotStep === "email" && (
-                    <form
-                      onSubmit={handleForgotSubmit(onForgotSubmit)}
-                      className="space-y-4"
-                    >
-                      <div className="space-y-2">
-                        <Label htmlFor="forgot-email">Email</Label>
-                        <div className="relative">
-                          <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                          <Input
-                            id="forgot-email"
-                            type="email"
-                            placeholder="you@example.com"
-                            className="pl-10"
-                            {...register("email")}
-                          />
-                        </div>
-                        {errors.email && (
-                          <p className="text-sm text-destructive">
-                            {errors.email.message}
-                          </p>
-                        )}
+                    <>
+                      <DialogTitle>Reset your password</DialogTitle>
+                      <DialogDescription>
+                        Enter your email address to receive a verification code.
+                      </DialogDescription>
+                    </>
+                  )}
+                  {forgotStep === "otp" && (
+                    <>
+                      <DialogTitle>Enter verification code</DialogTitle>
+                      <DialogDescription>
+                        We sent a 6-digit code to your email. Enter it below to
+                        continue.
+                      </DialogDescription>
+                    </>
+                  )}
+                  {forgotStep === "reset" && (
+                    <>
+                      <DialogTitle>Create a new password</DialogTitle>
+                      <DialogDescription>
+                        Set a strong password you haven't used before.
+                      </DialogDescription>
+                    </>
+                  )}
+                </DialogHeader>
+
+                {forgotStep === "email" && (
+                  <form
+                    onSubmit={(e) => {
+                      e.stopPropagation();
+                      handleForgotSubmit(onForgotSubmit)(e as any);
+                    }}
+                    className="space-y-4"
+                  >
+                    <div className="space-y-2">
+                      <Label htmlFor="forgot-email">Email</Label>
+                      <div className="relative">
+                        <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          id="forgot-email"
+                          type="email"
+                          placeholder="you@example.com"
+                          className="pl-10"
+                          {...register("email")}
+                        />
                       </div>
-                      <div className="flex items-center justify-between gap-2">
+                      {errors.email && (
+                        <p className="text-sm text-destructive">
+                          {errors.email.message}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={() => {
+                          setForgotOpen(false);
+                          setForgotStep("email");
+                          reset();
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="submit"
+                        disabled={isSubmitting || sendingOtp}
+                      >
+                        {sendingOtp ? "Sending..." : "Send code"}
+                      </Button>
+                    </div>
+                  </form>
+                )}
+
+                {forgotStep === "otp" && (
+                  <form
+                    onSubmit={(e) => {
+                      e.stopPropagation();
+                      onVerifyOtp(e);
+                    }}
+                    className="space-y-4"
+                  >
+                    <div className="flex justify-center">
+                      <InputOTP maxLength={6} value={otp} onChange={setOtp}>
+                        <InputOTPGroup>
+                          <InputOTPSlot index={0} />
+                          <InputOTPSlot index={1} />
+                          <InputOTPSlot index={2} />
+                        </InputOTPGroup>
+                        <InputOTPSeparator />
+                        <InputOTPGroup>
+                          <InputOTPSlot index={3} />
+                          <InputOTPSlot index={4} />
+                          <InputOTPSlot index={5} />
+                        </InputOTPGroup>
+                      </InputOTP>
+                    </div>
+
+                    <div className="flex items-center justify-between text-sm text-muted-foreground">
+                      <button
+                        type="button"
+                        className="underline underline-offset-4"
+                        onClick={handleResendCode}
+                        disabled={
+                          sendingOtp ||
+                          !(forgotEmail || getValues("email") || email)
+                        }
+                      >
+                        {sendingOtp ? "Resending..." : "Resend code"}
+                      </button>
+                      <button
+                        type="button"
+                        className="underline underline-offset-4"
+                        onClick={() => {
+                          setForgotStep("email");
+                          reset();
+                        }}
+                      >
+                        Change email
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={() => setForgotStep("email")}
+                      >
+                        Back
+                      </Button>
+                      <Button type="submit">Verify code</Button>
+                    </div>
+                  </form>
+                )}
+
+                {forgotStep === "reset" && (
+                  <form
+                    onSubmit={(e) => {
+                      e.stopPropagation();
+                      onResetPassword(e);
+                    }}
+                    className="space-y-4"
+                  >
+                    <div className="space-y-2">
+                      <Label htmlFor="new-password">New password</Label>
+                      <div className="relative">
+                        <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          id="new-password"
+                          type={showNewPassword ? "text" : "password"}
+                          placeholder="Enter new password"
+                          value={newPassword}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                          className="pl-10 pr-10"
+                        />
                         <Button
                           type="button"
                           variant="ghost"
-                          onClick={() => setForgotOpen(false)}
+                          size="sm"
+                          className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                          onClick={() => setShowNewPassword(!showNewPassword)}
                         >
-                          Cancel
-                        </Button>
-                        <Button type="submit" disabled={isSubmitting}>
-                          Send code
+                          {showNewPassword ? (
+                            <EyeOff className="h-4 w-4 text-muted-foreground" />
+                          ) : (
+                            <Eye className="h-4 w-4 text-muted-foreground" />
+                          )}
                         </Button>
                       </div>
-                    </form>
-                  )}
+                    </div>
 
-                  {forgotStep === "otp" && (
-                    <form onSubmit={onVerifyOtp} className="space-y-4">
-                      <div className="flex justify-center">
-                        <InputOTP maxLength={6} value={otp} onChange={setOtp}>
-                          <InputOTPGroup>
-                            <InputOTPSlot index={0} />
-                            <InputOTPSlot index={1} />
-                            <InputOTPSlot index={2} />
-                          </InputOTPGroup>
-                          <InputOTPSeparator />
-                          <InputOTPGroup>
-                            <InputOTPSlot index={3} />
-                            <InputOTPSlot index={4} />
-                            <InputOTPSlot index={5} />
-                          </InputOTPGroup>
-                        </InputOTP>
-                      </div>
-                      <div className="flex items-center justify-between text-sm text-muted-foreground">
-                        <button
+                    <div className="space-y-2">
+                      <Label htmlFor="confirm-new-password">
+                        Confirm new password
+                      </Label>
+                      <div className="relative">
+                        <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          id="confirm-new-password"
+                          type={showConfirmNewPassword ? "text" : "password"}
+                          placeholder="Re-enter new password"
+                          value={confirmNewPassword}
+                          onChange={(e) =>
+                            setConfirmNewPassword(e.target.value)
+                          }
+                          className="pl-10 pr-10"
+                        />
+                        <Button
                           type="button"
-                          className="underline underline-offset-4"
+                          variant="ghost"
+                          size="sm"
+                          className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
                           onClick={() =>
-                            toast({
-                              title: "Code resent",
-                              description:
-                                "We sent another code to your email.",
-                            })
+                            setShowConfirmNewPassword(!showConfirmNewPassword)
                           }
                         >
-                          Resend code
-                        </button>
-                        <button
-                          type="button"
-                          className="underline underline-offset-4"
-                          onClick={() => setForgotStep("email")}
-                        >
-                          Change email
-                        </button>
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          onClick={() => setForgotStep("email")}
-                        >
-                          Back
+                          {showConfirmNewPassword ? (
+                            <EyeOff className="h-4 w-4 text-muted-foreground" />
+                          ) : (
+                            <Eye className="h-4 w-4 text-muted-foreground" />
+                          )}
                         </Button>
-                        <Button type="submit">Verify code</Button>
                       </div>
-                    </form>
-                  )}
+                    </div>
 
-                  {forgotStep === "reset" && (
-                    <form onSubmit={onResetPassword} className="space-y-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="new-password">New password</Label>
-                        <div className="relative">
-                          <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                          <Input
-                            id="new-password"
-                            type={showNewPassword ? "text" : "password"}
-                            placeholder="Enter new password"
-                            value={newPassword}
-                            onChange={(e) => setNewPassword(e.target.value)}
-                            className="pl-10 pr-10"
-                          />
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                            onClick={() => setShowNewPassword(!showNewPassword)}
-                          >
-                            {showNewPassword ? (
-                              <EyeOff className="h-4 w-4 text-muted-foreground" />
-                            ) : (
-                              <Eye className="h-4 w-4 text-muted-foreground" />
-                            )}
-                          </Button>
-                        </div>
-                      </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={() => setForgotStep("otp")}
+                      >
+                        Back
+                      </Button>
+                      <Button type="submit" disabled={resettingPassword}>
+                        {resettingPassword ? "Updating..." : "Update password"}
+                      </Button>
+                    </div>
+                  </form>
+                )}
+              </DialogContent>
+            </Dialog>
 
-                      <div className="space-y-2">
-                        <Label htmlFor="confirm-new-password">
-                          Confirm new password
-                        </Label>
-                        <div className="relative">
-                          <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                          <Input
-                            id="confirm-new-password"
-                            type={showConfirmNewPassword ? "text" : "password"}
-                            placeholder="Re-enter new password"
-                            value={confirmNewPassword}
-                            onChange={(e) =>
-                              setConfirmNewPassword(e.target.value)
-                            }
-                            className="pl-10 pr-10"
-                          />
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                            onClick={() =>
-                              setShowConfirmNewPassword(!showConfirmNewPassword)
-                            }
-                          >
-                            {showConfirmNewPassword ? (
-                              <EyeOff className="h-4 w-4 text-muted-foreground" />
-                            ) : (
-                              <Eye className="h-4 w-4 text-muted-foreground" />
-                            )}
-                          </Button>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-between gap-2">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          onClick={() => setForgotStep("otp")}
-                        >
-                          Back
-                        </Button>
-                        <Button type="submit">Update password</Button>
-                      </div>
-                    </form>
-                  )}
-                </DialogContent>
-              </Dialog>
-            </div>
-
-            <div className="text-center text-sm text-muted-foreground">
+            <div className="mt-4">
               Don't have an account?{" "}
               <Link
                 to="/register"
@@ -465,7 +601,7 @@ const Login = () => {
                 Sign up
               </Link>
             </div>
-          </form>
+          </div>
         </CardContent>
       </Card>
     </div>

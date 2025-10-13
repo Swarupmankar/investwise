@@ -11,6 +11,12 @@ export const ENDPOINTS = {
     KYC_STATUS: "/users/user-profile/kyc-status",
   },
 
+  AUTH: {
+    SEND_FORGET_PASSWORD_OTP: (email: string) =>
+      `/users/auth/send-forget-password-otp?email=${encodeURIComponent(email)}`,
+    RESET_PASSWORD_USING_OTP: `/users/auth/reset-password-using-otp`,
+  },
+
   SUPPORT: {
     SUPPORT_CREATE: "/users/support/create-ticket",
     GET_ALL_TICKETS: "/users/support/all-tickets",
@@ -39,6 +45,7 @@ export const ENDPOINTS = {
 
   TRANSACTIONS: {
     CREATE_DEPOSIT: "/users/transactions/create-deposit-transaction",
+    DEPOSIT_WALLET: "/admin/wallet/active",
     GET_TRANSACTIONS: "/users/transactions",
   },
 

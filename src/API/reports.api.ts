@@ -1,4 +1,3 @@
-// src/API/report.api.ts
 import {
   GetReportsResponse,
   ReportNormalized,

@@ -14,3 +14,7 @@ export interface DepositResponse {
   createdAt: string;
   updatedAt?: string | null;
 }
+
+export interface DepositWalletResponse {
+  address: string;
+}

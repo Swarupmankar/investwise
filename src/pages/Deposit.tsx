@@ -22,14 +22,26 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   useGetTransactionsQuery,
   useCreateDepositTransactionMutation,
+  useGetDepositWalletQuery, // <-- new hook to fetch active wallet
 } from "@/API/transactions.api";
 
 export default function Deposit() {
-  const [walletAddress] = useState("TKzWJDEqhbdkmkgVxPFVbf6G4JQ8jKs9Q5");
+  // remove static walletAddress state; we will fetch it
   const [transactionId, setTransactionId] = useState("");
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [amount, setAmount] = useState<string>("");
   const { toast } = useToast();
+
+  // fetch wallet address
+  const {
+    data: depositWalletResp,
+    isLoading: walletLoading,
+    isFetching: walletFetching,
+    isError: walletError,
+    refetch: refetchWallet,
+  } = useGetDepositWalletQuery();
+
+  const walletAddress = depositWalletResp?.address ?? "";
 
   // fetch history from API
   const {
@@ -47,12 +59,28 @@ export default function Deposit() {
   // image modal state
   const [openImageUrl, setOpenImageUrl] = useState<string | null>(null);
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    toast({
-      title: "Copied!",
-      description: "Wallet address copied to clipboard",
-    });
+  const copyToClipboard = async (text: string) => {
+    if (!text) {
+      toast({
+        title: "No address",
+        description: "Wallet address not available to copy.",
+        variant: "destructive",
+      });
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      toast({
+        title: "Copied!",
+        description: "Wallet address copied to clipboard",
+      });
+    } catch {
+      toast({
+        title: "Copy failed",
+        description: "Could not copy to clipboard",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -135,10 +163,8 @@ export default function Deposit() {
       setProofFile(null);
 
       // RTK invalidation should refetch history automatically
-      // but call refetch to be extra sure in case your baseApi doesn't invalidate
       refetchHistory();
     } catch (err: any) {
-      // try to pick friendly message
       const serverMessage =
         err?.data?.message || err?.error || err?.message || "Submission failed";
       toast({
@@ -184,18 +210,45 @@ export default function Deposit() {
               <div className="space-y-2">
                 <Label className="text-card-foreground">Wallet Address</Label>
                 <div className="flex gap-2">
-                  <Input
-                    value={walletAddress}
-                    readOnly
-                    className="bg-input border-border text-foreground font-mono text-sm"
-                  />
-                  <Button
-                    onClick={() => copyToClipboard(walletAddress)}
-                    variant="outline"
-                    className="border-border"
-                  >
-                    <Copy className="h-4 w-4" />
-                  </Button>
+                  {walletLoading ? (
+                    <div className="flex-1">
+                      <Skeleton className="h-10 w-full" />
+                    </div>
+                  ) : walletError ? (
+                    <div className="flex-1">
+                      <Input
+                        value={"Unable to load address"}
+                        readOnly
+                        className="bg-input border-border text-foreground text-sm"
+                      />
+                      <div className="mt-2 flex gap-2">
+                        <Button
+                          onClick={() => refetchWallet()}
+                          variant="ghost"
+                          className="border-border"
+                        >
+                          Retry
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <Input
+                        value={walletAddress}
+                        readOnly
+                        className="bg-input border-border text-foreground font-mono text-sm"
+                      />
+                      <Button
+                        onClick={() => copyToClipboard(walletAddress)}
+                        variant="outline"
+                        className="border-border"
+                        disabled={!walletAddress}
+                        aria-disabled={!walletAddress}
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </>
+                  )}
                 </div>
               </div>
 

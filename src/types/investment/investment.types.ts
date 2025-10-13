@@ -41,9 +41,9 @@ export interface InvestmentNormalized {
   thisMonthsReturns?: number;
   lastReturnsRecieved?: string | null;
   userId: number;
-  createdAt: Date;
-  updatedAt: Date;
-  startDate: Date;
+  createdAt: string;
+  updatedAt: string;
+  startDate: string;
   roi: number;
 }
 

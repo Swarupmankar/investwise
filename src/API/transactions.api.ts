@@ -1,5 +1,8 @@
 // src/API/transactionsApi.ts
-import { DepositResponse } from "@/types/transctions/deposit.types";
+import {
+  DepositResponse,
+  DepositWalletResponse,
+} from "@/types/transctions/deposit.types";
 import { baseApi } from "./baseApi";
 import { ENDPOINTS } from "@/constants/apiEndpoints";
 import { GetTransactionsResponse } from "@/types/transctions/transactions.types";
@@ -27,9 +30,25 @@ export const transactionsApi = baseApi.injectEndpoints({
 
       invalidatesTags: [{ type: "Transactions" as const, id: "LIST" }],
     }),
+
+    // GET DEPOSIT WALLET
+    getDepositWallet: build.query<DepositWalletResponse, void>({
+      query: () => ({
+        url: ENDPOINTS.TRANSACTIONS.DEPOSIT_WALLET, // "/admin/wallet/active"
+        method: "GET",
+      }),
+      // optional: cache tag so you can invalidate if wallet changes
+      providesTags: [{ type: "Transactions" as const, id: "ACTIVE" }],
+      transformResponse: (res: unknown) => {
+        return (res ?? {}) as DepositWalletResponse;
+      },
+    }),
   }),
   overrideExisting: false,
 });
 
-export const { useCreateDepositTransactionMutation, useGetTransactionsQuery } =
-  transactionsApi;
+export const {
+  useCreateDepositTransactionMutation,
+  useGetTransactionsQuery,
+  useGetDepositWalletQuery,
+} = transactionsApi;

@@ -1,4 +1,3 @@
-// src/API/notificationApi.ts
 import { baseApi } from "./baseApi";
 import { ENDPOINTS } from "@/constants/apiEndpoints";
 import type { GetAllNotificationsResponse } from "@/types/notification/notifications.types";
