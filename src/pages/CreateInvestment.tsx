@@ -169,9 +169,7 @@ export default function CreateInvestment() {
     referralCode?: string;
   };
 
-  // Confirm: call mutation and send exact dropdown values
   const handleConfirmInvestment = async () => {
-    // Final pre-submit validation
     if (!investmentPurpose || !investmentDuration) {
       toast({
         title: "Missing selection",
@@ -187,33 +185,14 @@ export default function CreateInvestment() {
       name: investmentName?.trim()
         ? investmentName.trim()
         : selectedPlan?.name ?? "",
-      // send *exact* human readable dropdown values
       forWhome: investmentPurpose,
       duration: investmentDuration,
     };
 
     if (referralCode?.trim()) payload.referralCode = referralCode.trim();
 
-    // Debug logs: show form state before sending
-    // eslint-disable-next-line no-console
-    console.log("CreateInvestment - debug: form state =>", {
-      investmentAmount,
-      investmentName,
-      investmentPurpose,
-      investmentDuration,
-      referralCode,
-      selectedPlan,
-      availableBalance,
-    });
-    // eslint-disable-next-line no-console
-    console.log("CreateInvestment - debug: payload =>", payload);
-
     try {
       const res = await createInvestmentApi(payload).unwrap();
-      // eslint-disable-next-line no-console
-      console.log("CreateInvestment - debug: server response =>", res);
-
-      // Optionally update local store for immediate UX (server is source of truth)
       try {
         localCreateInvestment(
           `plan_${selectedPlan.id}`,
@@ -235,35 +214,35 @@ export default function CreateInvestment() {
 
       navigate("/");
     } catch (err: any) {
-      // eslint-disable-next-line no-console
-      console.error("CreateInvestment - debug: create error =>", err);
+      const errorMessage = err?.data?.message || err?.message || "";
 
-      // try to read server-friendly message
-      const serverMessage =
-        err?.data?.message ||
-        err?.data?.errors ||
-        err?.message ||
-        "Failed to create investment. Please try again.";
+      if (
+        errorMessage.includes("referral") ||
+        errorMessage.includes("Referral") ||
+        errorMessage.includes("invalid") ||
+        errorMessage.includes("Invalid") ||
+        err?.data?.errors?.referralCode
+      ) {
+        toast({
+          title: "Invalid Referral Code",
+          description:
+            "The referral code you entered is invalid. Please check and try again.",
+          variant: "destructive",
+        });
+      } else {
+        // For other errors, show the server message
+        const serverMessage =
+          errorMessage ||
+          err?.data?.errors ||
+          "Failed to create investment. Please try again.";
 
-      toast({
-        title: "Create Failed",
-        description: String(serverMessage),
-        variant: "destructive",
-      });
+        toast({
+          title: "Create Failed",
+          description: String(serverMessage),
+          variant: "destructive",
+        });
+      }
     }
-  };
-
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    toast({
-      title: "Copied!",
-      description: "Wallet address copied to clipboard",
-    });
-  };
-
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) setProofFile(file);
   };
 
   // small helpers
@@ -567,12 +546,6 @@ export default function CreateInvestment() {
             value={investmentPurpose}
             onValueChange={(v) => {
               setInvestmentPurpose(v);
-              // debug log each change
-              // eslint-disable-next-line no-console
-              console.log(
-                "CreateInvestment - debug: investmentPurpose changed to:",
-                v
-              );
             }}
           >
             <div className="flex items-center space-x-2 p-3 rounded-lg border hover:bg-muted/30 transition-colors">
@@ -615,12 +588,6 @@ export default function CreateInvestment() {
             value={investmentDuration}
             onValueChange={(v) => {
               setInvestmentDuration(v);
-              // debug log each change
-              // eslint-disable-next-line no-console
-              console.log(
-                "CreateInvestment - debug: investmentDuration changed to:",
-                v
-              );
             }}
           >
             <div className="flex items-center space-x-2 p-3 rounded-lg border hover:bg-muted/30 transition-colors">
@@ -674,12 +641,6 @@ export default function CreateInvestment() {
               value={referralCode}
               onChange={(e) => {
                 setReferralCode(e.target.value);
-                // debug
-                // eslint-disable-next-line no-console
-                console.log(
-                  "CreateInvestment - debug: referralCode changed to:",
-                  e.target.value
-                );
               }}
               className="pl-10 h-10 text-base bg-white border-2 focus:border-primary/50"
             />

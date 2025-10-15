@@ -14,6 +14,7 @@ import InvestorQuestionnaire, {
 } from "@/components/InvestorQuestionnaire";
 import { useSaveAnswersMutation } from "@/API/onbording.api";
 import { useToast } from "@/hooks/use-toast";
+
 interface QuestionnaireModalProps {
   isOpen: boolean;
   onComplete: () => void;
@@ -44,19 +45,34 @@ const QUESTION_LABELS: Record<number, string> = {
 
 const requiredQuestionIds = Object.keys(QUESTION_LABELS).map((k) => Number(k));
 
+const isValidEmail = (value: string) =>
+  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+
+const isValidPhone = (value: string) => {
+  const v = value.trim();
+  return /^\+?\d{7,15}$/.test(v);
+};
+
 const QuestionnaireModal = ({
   isOpen,
   onComplete,
 }: QuestionnaireModalProps) => {
   const [showQuestionnaire, setShowQuestionnaire] = useState(false);
-  const [canSkip, setCanSkip] = useState(false);
   const [latestFormData, setLatestFormData] =
     useState<QuestionnaireData | null>(null);
+
+  // Show banner only on submit attempt
   const [modalErrors, setModalErrors] = useState<string[] | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+
   const [jumpToStep, setJumpToStep] = useState<number | undefined>(undefined);
   const [invalidQuestionIds, setInvalidQuestionIds] = useState<number[]>([]);
   const [focusSignal, setFocusSignal] = useState(0);
+
+  // Track touched fields & whether we've attempted submit
+  const touchedIdsRef = useRef<Set<number>>(new Set());
+  const [showAllErrors, setShowAllErrors] = useState(false);
+  const firstChangeSeenRef = useRef(false); // <-- ignore initial sync
 
   const { toast } = useToast();
   const [saveAnswers, { isLoading: mutationLoading }] =
@@ -66,16 +82,16 @@ const QuestionnaireModal = ({
   const toastTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (isOpen) {
-      const t = window.setTimeout(() => setCanSkip(true), 10000);
-      return () => window.clearTimeout(t);
-    } else {
+    if (!isOpen) {
       setShowQuestionnaire(false);
       setModalErrors(null);
       setSaveError(null);
       setLatestFormData(null);
       setJumpToStep(undefined);
       setInvalidQuestionIds([]);
+      touchedIdsRef.current.clear();
+      setShowAllErrors(false);
+      firstChangeSeenRef.current = false;
     }
   }, [isOpen]);
 
@@ -86,31 +102,36 @@ const QuestionnaireModal = ({
     []
   );
 
+  const idToKey: Record<number, keyof QuestionnaireData> = {
+    1: "fullName",
+    2: "address",
+    3: "dateOfBirth",
+    4: "email",
+    5: "phone",
+    6: "annualIncome",
+    7: "previousInvestments",
+    8: "investmentExperience",
+    9: "occupation",
+    10: "initialInvestment",
+    11: "investmentTimeline",
+    12: "investmentGoal",
+    13: "investmentDuration",
+    14: "fundsSource",
+    15: "education",
+    16: "referralSource",
+    17: "referralInterest",
+    18: "cryptoFamiliarity",
+    19: "fundsControl",
+    20: "cryptoWallet",
+  };
+
+  const keyToId = Object.fromEntries(
+    Object.entries(idToKey).map(([id, key]) => [key, Number(id)])
+  ) as Record<keyof QuestionnaireData, number>;
+
   const buildAnswersPayload = (formData: QuestionnaireData) => ({
     answers: requiredQuestionIds.map((id) => {
-      const fieldMap: Record<number, keyof QuestionnaireData> = {
-        1: "fullName",
-        2: "address",
-        3: "dateOfBirth",
-        4: "email",
-        5: "phone",
-        6: "annualIncome",
-        7: "previousInvestments",
-        8: "investmentExperience",
-        9: "occupation",
-        10: "initialInvestment",
-        11: "investmentTimeline",
-        12: "investmentGoal",
-        13: "investmentDuration",
-        14: "fundsSource",
-        15: "education",
-        16: "referralSource",
-        17: "referralInterest",
-        18: "cryptoFamiliarity",
-        19: "fundsControl",
-        20: "cryptoWallet",
-      };
-      const key = fieldMap[id];
+      const key = idToKey[id];
       const val = (formData as any)[key];
       return {
         questionId: id,
@@ -122,6 +143,11 @@ const QuestionnaireModal = ({
     }),
   });
 
+  const isEmpty = (val: any) =>
+    val === undefined ||
+    val === null ||
+    (typeof val === "string" && val.trim() === "");
+
   const findMissingQuestions = (formData: QuestionnaireData | null) => {
     if (!formData)
       return requiredQuestionIds.map((id) => ({
@@ -129,77 +155,130 @@ const QuestionnaireModal = ({
         label: QUESTION_LABELS[id],
       }));
 
-    const map: Record<number, keyof QuestionnaireData> = {
-      1: "fullName",
-      2: "address",
-      3: "dateOfBirth",
-      4: "email",
-      5: "phone",
-      6: "annualIncome",
-      7: "previousInvestments",
-      8: "investmentExperience",
-      9: "occupation",
-      10: "initialInvestment",
-      11: "investmentTimeline",
-      12: "investmentGoal",
-      13: "investmentDuration",
-      14: "fundsSource",
-      15: "education",
-      16: "referralSource",
-      17: "referralInterest",
-      18: "cryptoFamiliarity",
-      19: "fundsControl",
-      20: "cryptoWallet",
-    };
-
     const missing: { questionId: number; label: string }[] = [];
     for (const id of requiredQuestionIds) {
-      const field = map[id];
-      const val = (formData as any)[field];
-      const isEmpty =
-        val === undefined ||
-        val === null ||
-        (typeof val === "string" && val.trim() === "");
-      if (isEmpty) missing.push({ questionId: id, label: QUESTION_LABELS[id] });
+      const key = idToKey[id];
+      const val = (formData as any)[key];
+      if (isEmpty(val))
+        missing.push({ questionId: id, label: QUESTION_LABELS[id] });
     }
     return missing;
   };
 
+  const findFormatIssues = (formData: QuestionnaireData | null) => {
+    const issues: { questionId: number; message: string }[] = [];
+    if (!formData) return issues;
+
+    if (
+      typeof formData.email === "string" &&
+      formData.email.trim() !== "" &&
+      !isValidEmail(formData.email)
+    ) {
+      issues.push({
+        questionId: 4,
+        message: "4. Primary email is not a valid email address",
+      });
+    }
+    if (
+      typeof formData.phone === "string" &&
+      formData.phone.trim() !== "" &&
+      !isValidPhone(formData.phone)
+    ) {
+      issues.push({
+        questionId: 5,
+        message:
+          "5. Phone number must be numbers only (optional +) and 7–15 digits",
+      });
+    }
+    return issues;
+  };
+
+  const computeAllInvalidIds = (formData: QuestionnaireData | null) => {
+    const missing = findMissingQuestions(formData).map((m) => m.questionId);
+    const formatIssues = findFormatIssues(formData).map((f) => f.questionId);
+    return Array.from(new Set([...missing, ...formatIssues])).sort(
+      (a, b) => a - b
+    );
+  };
+
+  const computeDisplayInvalidIds = (formData: QuestionnaireData | null) => {
+    const allInvalid = computeAllInvalidIds(formData);
+    if (showAllErrors) return allInvalid;
+    const touched = touchedIdsRef.current;
+    return allInvalid.filter((id) => touched.has(id));
+  };
+
+  // Mark touched fields:
+  // - Ignore the very first onDataChange (initial sync) unless the field became non-empty.
+  // - After that, mark a field touched only when its value actually changes.
+  const markTouchedFromDiff = (
+    prevData: QuestionnaireData | null,
+    nextData: QuestionnaireData
+  ) => {
+    if (!firstChangeSeenRef.current) {
+      // First change event (likely initial sync). Mark only non-empty fields as touched.
+      for (const key of Object.keys(nextData) as (keyof QuestionnaireData)[]) {
+        const val = nextData[key];
+        if (!isEmpty(val)) {
+          const id = keyToId[key];
+          touchedIdsRef.current.add(id);
+        }
+      }
+      firstChangeSeenRef.current = true;
+      return;
+    }
+
+    // Subsequent changes: mark only the field(s) that actually changed
+    if (prevData) {
+      for (const key of Object.keys(nextData) as (keyof QuestionnaireData)[]) {
+        const prevVal = prevData[key];
+        const nextVal = nextData[key];
+        if (prevVal !== nextVal) {
+          const id = keyToId[key];
+          touchedIdsRef.current.add(id);
+        }
+      }
+    }
+  };
+
+  // Realtime validation while typing (only show for touched fields)
   const handleDataChange = (data: QuestionnaireData) => {
+    markTouchedFromDiff(latestFormData, data);
     setLatestFormData(data);
+
+    const idsToShow = computeDisplayInvalidIds(data);
+    setInvalidQuestionIds(idsToShow);
+
+    // Hide banner while typing
     if (modalErrors) setModalErrors(null);
     if (saveError) setSaveError(null);
-    // clear invalid highlights while typing
-    if (invalidQuestionIds.length) setInvalidQuestionIds([]);
   };
 
   const handleQuestionnaireComplete = async (data: QuestionnaireData) => {
     if (submittingRef.current || mutationLoading) return;
     submittingRef.current = true;
 
+    setShowAllErrors(true); // After submit attempt, show all invalids
+
     const missing = findMissingQuestions(data);
-    if (missing.length > 0) {
+    const formatIssues = findFormatIssues(data);
+
+    if (missing.length > 0 || formatIssues.length > 0) {
+      const newInvalid = computeDisplayInvalidIds(data); // will now include all
+      setInvalidQuestionIds(newInvalid);
+
       const missingList = missing.map((m) => `${m.questionId}. ${m.label}`);
-      setModalErrors(missingList);
+      const formatList = formatIssues.map((f) => f.message);
+      setModalErrors([...missingList, ...formatList]);
 
-      // set invalid highlights and jump to first missing
-      const ids = missing.map((m) => m.questionId);
-      setInvalidQuestionIds(ids);
-      setFocusSignal((s) => s + 1);
-
-      const firstMissing = ids[0];
-      const stepForMissing = Math.ceil(firstMissing / 5);
-      setJumpToStep(stepForMissing);
+      const firstProblem = newInvalid[0];
+      if (firstProblem) {
+        const stepForMissing = Math.ceil(firstProblem / 5);
+        setJumpToStep(stepForMissing);
+        setFocusSignal((s) => s + 1);
+      }
       setShowQuestionnaire(true);
 
-      // toast informing the user
-      toast({
-        title: "All fields required",
-        description: "Please fill all required fields.",
-        variant: "destructive",
-      });
-
-      // scroll to top of dialog so errors are visible
       setTimeout(() => {
         if (dialogContentRef.current) dialogContentRef.current.scrollTop = 0;
       }, 90);
@@ -208,66 +287,21 @@ const QuestionnaireModal = ({
       return;
     }
 
-    // submit
+    // All good: submit
     setModalErrors(null);
     setSaveError(null);
     try {
       await saveAnswers(buildAnswersPayload(data)).unwrap();
       localStorage.setItem("questionnaireCompleted", "true");
       localStorage.setItem("questionnaireData", JSON.stringify(data));
-      toast({
-        title: "Success",
-        description: "Questionnaire submitted successfully.",
-        variant: "default",
-      });
-
-      // close after a short delay so toast is seen
-      toastTimerRef.current = window.setTimeout(() => onComplete(), 900);
+      onComplete();
     } catch (err: any) {
       console.error("submit error:", err);
       setSaveError("Failed to submit answers. Please try again.");
-      toast({
-        title: "Submission failed",
-        description: "Failed to submit answers. Please try again.",
-        variant: "destructive",
-      });
       setShowQuestionnaire(true);
     } finally {
       submittingRef.current = false;
     }
-  };
-
-  const handleSkip = () => {
-    if (!latestFormData) {
-      localStorage.setItem("questionnaireSkipped", "true");
-      onComplete();
-      return;
-    }
-
-    const missing = findMissingQuestions(latestFormData);
-    if (missing.length > 0) {
-      const missingList = missing.map((m) => `${m.questionId}. ${m.label}`);
-      setModalErrors(missingList);
-      setInvalidQuestionIds(missing.map((m) => m.questionId));
-      setFocusSignal((s) => s + 1);
-      const firstMissing = missing[0].questionId;
-      const stepForMissing = Math.ceil(firstMissing / 5);
-      setJumpToStep(stepForMissing);
-      setShowQuestionnaire(true);
-
-      toast({
-        title: "All fields required",
-        description: "Please fill all required fields.",
-        variant: "destructive",
-      });
-      setTimeout(() => {
-        if (dialogContentRef.current) dialogContentRef.current.scrollTop = 0;
-      }, 90);
-      return;
-    }
-
-    localStorage.setItem("questionnaireSkipped", "true");
-    onComplete();
   };
 
   const handleJumpHandled = () => setJumpToStep(undefined);
@@ -351,17 +385,6 @@ const QuestionnaireModal = ({
                       : "Complete Questionnaire (3 minutes)"}
                   </Button>
 
-                  {canSkip && (
-                    <Button
-                      variant="outline"
-                      onClick={handleSkip}
-                      className="w-full"
-                      disabled={isSubmitting}
-                    >
-                      Skip for now
-                    </Button>
-                  )}
-
                   <div className="mt-3">
                     <ErrorsBlock />
                   </div>
@@ -394,7 +417,6 @@ const QuestionnaireModal = ({
                   >
                     Back
                   </Button>
-
                   <div className="text-sm self-center text-muted-foreground">
                     {isSubmitting
                       ? "Saving..."

@@ -1,5 +1,5 @@
-// src/pages/Register.tsx
-import { useState } from "react";
+// src/pages/auth/Register.tsx
+import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,6 +26,7 @@ import {
   Phone,
   ArrowLeft,
   Check,
+  Loader2,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -33,12 +34,43 @@ import {
   useVerifyOtpMutation,
 } from "@/API/register.api";
 
+// ---------- helpers ----------
+const validateEmail = (email: string) =>
+  /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(email.trim());
+
+const normalizePhone = (raw: string) => raw.replace(/\D/g, "").slice(0, 10);
+const validatePhone = (phone: string) => /^\d{10}$/.test(phone);
+
+const maskEmail = (email: string) => {
+  const [name, domain] = email.split("@");
+  if (!name || !domain) return email;
+  const masked =
+    name.length <= 2
+      ? (name[0] ?? "") + "*"
+      : name[0] + "*".repeat(Math.max(1, name.length - 2)) + name.at(-1);
+  return `${masked}@${domain}`;
+};
+
+const friendlyApiError = (err: unknown): string => {
+  const anyErr = err as any;
+  const raw =
+    anyErr?.data?.message ||
+    anyErr?.error ||
+    anyErr?.message ||
+    "Something went wrong";
+  if (typeof raw === "string" && /prisma/i.test(raw))
+    return "Server error while creating your account. Please try again.";
+  return String(raw);
+};
+
+// ---------- component ----------
 const Register = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
+
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [step, setStep] = useState(1); // 1: Form, 2: OTP Verification
+  const [step, setStep] = useState<1 | 2>(1);
   const [otp, setOtp] = useState("");
 
   const [formData, setFormData] = useState({
@@ -51,56 +83,84 @@ const Register = () => {
     acceptTerms: false,
   });
 
-  // RTK Query mutations
+  const [touched, setTouched] = useState({
+    email: false,
+    phone: false,
+    confirmPassword: false,
+  });
+
   const [registerRequest, { isLoading: isRegistering }] =
     useRegisterRequestMutation();
   const [verifyOtp, { isLoading: isVerifying }] = useVerifyOtpMutation();
 
+  // derived validation
+  const emailValid = useMemo(
+    () => (formData.email ? validateEmail(formData.email) : false),
+    [formData.email]
+  );
+  const phoneValid = useMemo(
+    () => (formData.phone ? validatePhone(formData.phone) : false),
+    [formData.phone]
+  );
+  const confirmPasswordError = useMemo(() => {
+    if (!formData.confirmPassword) return "";
+    return formData.password === formData.confirmPassword
+      ? ""
+      : "Passwords do not match";
+  }, [formData.password, formData.confirmPassword]);
+
+  const canSubmit =
+    !!formData.firstName &&
+    !!formData.lastName &&
+    emailValid &&
+    phoneValid &&
+    !!formData.password &&
+    !confirmPasswordError &&
+    formData.acceptTerms &&
+    !isRegistering;
+
+  // handlers
+  const handleInputChange = (field: string, value: string | boolean) => {
+    if (field === "phone" && typeof value === "string") {
+      value = normalizePhone(value);
+    }
+    setFormData((prev) => ({ ...prev, [field]: value } as any));
+  };
+
+  const handleBlur = (field: "email" | "phone" | "confirmPassword") => {
+    setTouched((t) => ({ ...t, [field]: true }));
+  };
+
   const buildPayload = () => ({
-    firstName: formData.firstName,
-    lastName: formData.lastName,
-    email: formData.email,
+    firstName: formData.firstName.trim(),
+    lastName: formData.lastName.trim(),
+    email: formData.email.trim(),
     password: formData.password,
     phoneNumber: formData.phone,
-    // adminId will be injected by API (hardcoded = 1)
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (formData.password !== formData.confirmPassword) {
-      toast({
-        title: "Passwords do not match",
-        description: "Please re-enter your password.",
-        variant: "destructive",
-      });
-      return;
-    }
-    if (!formData.acceptTerms) {
-      toast({
-        title: "Agree to Terms",
-        description: "You must accept Terms of Service and Privacy Policy.",
-        variant: "destructive",
-      });
-      return;
-    }
+    // confirm password: inline-only, so just block submit
+    if (confirmPasswordError) return;
 
-    const payload = buildPayload();
+    // keep inline-only for fields, but guard submit with simple checks
+    if (!emailValid || !phoneValid || !formData.acceptTerms) return;
 
     try {
-      // call register mutation; unwrap to throw on non-2xx
-      const res = await registerRequest(payload).unwrap();
-      // show toast and move to OTP step
+      await registerRequest(buildPayload()).unwrap();
       toast({
         title: "Verification code sent",
-        description: `A 6-digit code has been sent to ${formData.email}`,
+        description: `A 6-digit code has been sent to ${maskEmail(
+          formData.email
+        )}`,
       });
       setStep(2);
-    } catch (err: any) {
-      const message = err?.data?.message || err?.error || "Registration failed";
+    } catch (err) {
       toast({
         title: "Registration failed",
-        description: String(message),
+        description: friendlyApiError(err),
         variant: "destructive",
       });
     }
@@ -108,6 +168,7 @@ const Register = () => {
 
   const handleOtpSubmit = async () => {
     if (otp.length !== 6) {
+      // keep this as toast (action feedback)
       toast({
         title: "Invalid code",
         description: "Please enter the 6-digit verification code.",
@@ -123,38 +184,31 @@ const Register = () => {
         description: "Welcome! You can now sign in to your account.",
       });
       navigate("/login");
-    } catch (err: any) {
-      const message = err?.data?.message || err?.error || "Verification failed";
+    } catch (err) {
       toast({
         title: "Verification failed",
-        description: String(message),
+        description: friendlyApiError(err),
         variant: "destructive",
       });
     }
   };
 
   const handleResendOtp = async () => {
-    const payload = buildPayload();
-
     try {
-      await registerRequest(payload).unwrap();
+      await registerRequest(buildPayload()).unwrap();
       toast({
         title: "Code sent",
-        description: `A new verification code has been sent to ${formData.email}`,
+        description: `A new verification code has been sent to ${maskEmail(
+          formData.email
+        )}`,
       });
-    } catch (err: any) {
-      const message =
-        err?.data?.message || err?.error || "Could not resend code";
+    } catch (err) {
       toast({
         title: "Resend failed",
-        description: String(message),
+        description: friendlyApiError(err),
         variant: "destructive",
       });
     }
-  };
-
-  const handleInputChange = (field: string, value: string | boolean) => {
-    setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
   return (
@@ -167,12 +221,13 @@ const Register = () => {
           <CardDescription>
             {step === 1
               ? "Join us and start your investment journey"
-              : `Enter the 6-digit code sent to ${formData.email}`}
+              : `Enter the 6-digit code sent to ${maskEmail(formData.email)}`}
           </CardDescription>
         </CardHeader>
+
         <CardContent>
           {step === 1 ? (
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-4" noValidate>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="firstName">First Name</Label>
@@ -211,6 +266,7 @@ const Register = () => {
                 </div>
               </div>
 
+              {/* Email */}
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
                 <div className="relative">
@@ -221,12 +277,24 @@ const Register = () => {
                     placeholder="Enter your email"
                     value={formData.email}
                     onChange={(e) => handleInputChange("email", e.target.value)}
-                    className="pl-10"
+                    onBlur={() => handleBlur("email")}
+                    aria-invalid={touched.email && !emailValid}
+                    className={`pl-10 ${
+                      touched.email && !emailValid
+                        ? "border-destructive focus-visible:ring-destructive"
+                        : ""
+                    }`}
                     required
                   />
                 </div>
+                {touched.email && !emailValid && (
+                  <p role="alert" className="text-xs text-destructive">
+                    Please enter a valid email address (e.g. name@example.com).
+                  </p>
+                )}
               </div>
 
+              {/* Phone */}
               <div className="space-y-2">
                 <Label htmlFor="phone">Phone Number</Label>
                 <div className="relative">
@@ -234,15 +302,32 @@ const Register = () => {
                   <Input
                     id="phone"
                     type="tel"
-                    placeholder="Enter your phone number"
+                    inputMode="numeric"
+                    placeholder="10-digit mobile number"
                     value={formData.phone}
                     onChange={(e) => handleInputChange("phone", e.target.value)}
-                    className="pl-10"
+                    onBlur={() => handleBlur("phone")}
+                    aria-invalid={touched.phone && !phoneValid}
+                    className={`pl-10 ${
+                      touched.phone && !phoneValid
+                        ? "border-destructive focus-visible:ring-destructive"
+                        : ""
+                    }`}
                     required
                   />
                 </div>
+                {touched.phone && !phoneValid ? (
+                  <p role="alert" className="text-xs text-destructive">
+                    Enter a 10-digit mobile number (numbers only).
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    India format (10 digits). We’ll add +91 automatically.
+                  </p>
+                )}
               </div>
 
+              {/* Password */}
               <div className="space-y-2">
                 <Label htmlFor="password">Password</Label>
                 <div className="relative">
@@ -263,7 +348,10 @@ const Register = () => {
                     variant="ghost"
                     size="sm"
                     className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                    onClick={() => setShowPassword(!showPassword)}
+                    onClick={() => setShowPassword((s) => !s)}
+                    aria-label={
+                      showPassword ? "Hide password" : "Show password"
+                    }
                   >
                     {showPassword ? (
                       <EyeOff className="h-4 w-4 text-muted-foreground" />
@@ -274,6 +362,7 @@ const Register = () => {
                 </div>
               </div>
 
+              {/* Confirm Password (inline-only errors) */}
               <div className="space-y-2">
                 <Label htmlFor="confirmPassword">Confirm Password</Label>
                 <div className="relative">
@@ -286,7 +375,13 @@ const Register = () => {
                     onChange={(e) =>
                       handleInputChange("confirmPassword", e.target.value)
                     }
-                    className="pl-10 pr-10"
+                    onBlur={() => handleBlur("confirmPassword")}
+                    aria-invalid={!!confirmPasswordError}
+                    className={`pl-10 pr-10 ${
+                      confirmPasswordError
+                        ? "border-destructive focus-visible:ring-destructive"
+                        : ""
+                    }`}
                     required
                   />
                   <Button
@@ -294,7 +389,12 @@ const Register = () => {
                     variant="ghost"
                     size="sm"
                     className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    onClick={() => setShowConfirmPassword((s) => !s)}
+                    aria-label={
+                      showConfirmPassword
+                        ? "Hide confirm password"
+                        : "Show confirm password"
+                    }
                   >
                     {showConfirmPassword ? (
                       <EyeOff className="h-4 w-4 text-muted-foreground" />
@@ -303,6 +403,11 @@ const Register = () => {
                     )}
                   </Button>
                 </div>
+                {confirmPasswordError && (
+                  <p role="alert" className="text-xs text-destructive">
+                    {confirmPasswordError}
+                  </p>
+                )}
               </div>
 
               <div className="flex items-center space-x-2">
@@ -328,12 +433,15 @@ const Register = () => {
                 </Label>
               </div>
 
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={!formData.acceptTerms || isRegistering}
-              >
-                Create Account
+              <Button type="submit" className="w-full" disabled={!canSubmit}>
+                {isRegistering ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Creating...
+                  </>
+                ) : (
+                  "Create Account"
+                )}
               </Button>
 
               <div className="text-center text-sm text-muted-foreground">
@@ -378,7 +486,11 @@ const Register = () => {
                   className="w-full"
                   disabled={otp.length !== 6 || isVerifying}
                 >
-                  <Check className="h-4 w-4 mr-2" />
+                  {isVerifying ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Check className="h-4 w-4 mr-2" />
+                  )}
                   Verify & Create Account
                 </Button>
 

@@ -150,7 +150,17 @@ const parseAmountRobust = (v: unknown): number => {
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const [showQuestionnaireModal, setShowQuestionnaireModal] = useState(false);
+
+  // NO-BLINK QUESTIONNAIRE:
+  // - Show immediately only if we *already know* from localStorage that it's incomplete ("false")
+  // - If we have no prior knowledge (null), wait for server before deciding (prevents flash)
+  const stored = localStorage.getItem("questionnaireCompleted"); // "true" | "false" | null
+  const [showQuestionnaireModal, setShowQuestionnaireModal] = useState<boolean>(
+    stored === "false"
+  );
+  const [needsServerDecision, setNeedsServerDecision] = useState<boolean>(
+    stored === null
+  );
 
   // pagination
   const [currentPage, setCurrentPage] = useState(1);
@@ -206,32 +216,27 @@ export default function Dashboard() {
     }
   }, [portfolio]);
 
+  // Decide questionnaire visibility without blink
   useEffect(() => {
-    if (isAnsweredLoading) return;
+    if (!needsServerDecision) return; // We already decided from localStorage
+    if (isAnsweredLoading) return; // Wait for server so there's no flash
 
-    if (isAnsweredData?.allAnswered) {
-      localStorage.removeItem("questionnaireCompleted");
+    if (isAnsweredData?.allAnswered === true) {
+      localStorage.setItem("questionnaireCompleted", "true");
       setShowQuestionnaireModal(false);
+      setNeedsServerDecision(false);
+      return;
+    }
+    if (isAnsweredData?.allAnswered === false) {
+      localStorage.setItem("questionnaireCompleted", "false");
+      setShowQuestionnaireModal(true);
+      setNeedsServerDecision(false);
       return;
     }
 
-    if (isAnsweredData && !isAnsweredData.allAnswered) {
-      setShowQuestionnaireModal(true);
-      return;
-    }
-
-    const questionnaireCompleted =
-      localStorage.getItem("questionnaireCompleted") === "true";
-    const questionnaireSkipped =
-      localStorage.getItem("questionnaireSkipped") === "true";
-    const hasSeenModal =
-      localStorage.getItem("hasSeenQuestionnaireModal") === "true";
-
-    if (!questionnaireCompleted && !questionnaireSkipped && !hasSeenModal) {
-      setShowQuestionnaireModal(true);
-      localStorage.setItem("hasSeenQuestionnaireModal", "true");
-    }
-  }, [isAnsweredData, isAnsweredLoading]);
+    // If API didn't provide a usable answer, don't change UI; avoid showing unexpectedly.
+    setNeedsServerDecision(false);
+  }, [needsServerDecision, isAnsweredLoading, isAnsweredData]);
 
   const handleQuestionnaireComplete = () => {
     localStorage.setItem("questionnaireCompleted", "true");
@@ -270,6 +275,22 @@ export default function Dashboard() {
 
   const formatCurrency = (n?: number) =>
     Number.isFinite(n ?? NaN) ? (n as number).toLocaleString() : "0";
+
+  // Status badge — includes PAUSED and ARCHIVE with readable colors
+  const getStatusBadge = (status: string) => {
+    const s = (status || "").toLowerCase();
+    const variants: Record<string, string> = {
+      active: "bg-success/10 text-success border-success/20",
+      archive: "bg-muted text-muted-foreground border-border",
+      paused: "bg-yellow-100 text-yellow-700 border-yellow-300", // visible yellow
+      // keep previous mappings for compatibility
+      mature: "bg-purple-500/10 text-purple-600 border-purple-500/20",
+      closed: "bg-muted text-muted-foreground border-border",
+      completed: "bg-muted text-muted-foreground border-border",
+      pending: "bg-warning/10 text-warning border-warning/20",
+    };
+    return variants[s] ?? "bg-muted text-muted-foreground border-border";
+  };
 
   const dashboardStats = useMemo(
     () => [
@@ -312,17 +333,6 @@ export default function Dashboard() {
     ],
     [displayedUser]
   );
-
-  const getStatusBadge = (status: string) => {
-    const variants: Record<string, string> = {
-      active: "bg-success/10 text-success border-success/20",
-      mature: "bg-purple-500/10 text-purple-600 border-purple-500/20",
-      closed: "bg-muted text-muted-foreground border-border",
-      completed: "bg-muted text-muted-foreground border-border",
-      pending: "bg-warning/10 text-warning border-warning/20",
-    };
-    return variants[status] ?? "bg-muted";
-  };
 
   return (
     <div className="space-y-8">

@@ -678,6 +678,27 @@ export default function Referrals() {
               </Button>
             </div>
 
+            {/* ✅ NEW Referral Code Field */}
+            {statsData?.referral?.code && (
+              <div className="flex gap-3">
+                <div className="flex-1 p-3 bg-muted/30 rounded-lg border border-border">
+                  <Input
+                    value={statsData.referral.code}
+                    readOnly
+                    className="bg-transparent border-none text-foreground font-mono text-sm p-0 focus-visible:ring-0"
+                  />
+                </div>
+                <Button
+                  onClick={() => copyToClipboard(statsData.referral.code)}
+                  variant="outline"
+                  className="px-4 py-3 border-border hover:bg-muted/50"
+                >
+                  <Copy className="h-4 w-4 mr-2" />
+                  Copy
+                </Button>
+              </div>
+            )}
+
             <div className="p-3 bg-success/5 rounded-lg border border-success/20">
               <p className="text-sm text-foreground">
                 <span className="font-medium">Commission Rate:</span> Earn 1%
