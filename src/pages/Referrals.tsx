@@ -146,17 +146,33 @@ export default function Referrals() {
   const referralData = useMemo(() => {
     if (!commissionHistory?.items) return [];
 
-    return commissionHistory.items.map((item) => ({
-      id: item.id,
-      username: item.userName || "Unknown User",
-      email: item.userEmail || "No email",
-      dateJoined: item.dateInvestmentCreated || item.createdAt,
-      status: mapStatus(item.status),
-      commission: parseFloat(item.investmentAmount) * 0.01,
-      tier: getTier(parseFloat(item.investmentAmount)),
-      investmentAmount: parseFloat(item.investmentAmount),
-      bonusEarned: parseFloat(item.investmentAmount) * 0.01,
-    }));
+    return commissionHistory.items.map((item) => {
+      const investmentAmount = Number(item.investmentAmount ?? 0);
+      // prefer API aliases you exposed: amount → commissionEarned → commission
+      const rawCommission =
+        item.amount ?? item.commissionEarned ?? item.commission ?? "0";
+      const commission = Number(rawCommission) || 0;
+
+      // purely for display so the label matches reality
+      const ratePct =
+        investmentAmount > 0 ? (commission / investmentAmount) * 100 : 0;
+
+      return {
+        id: item.id,
+        username: item.userName || "Unknown User",
+        email: item.userEmail || "No email",
+        dateJoined: item.dateInvestmentCreated || item.createdAt,
+        status: mapStatus(item.status),
+
+        // ✅ backend-driven values
+        commission, // used in totals
+        bonusEarned: commission, // used in the table cell below
+
+        tier: getTier(investmentAmount),
+        investmentAmount,
+        ratePct,
+      };
+    });
   }, [commissionHistory]);
 
   function mapStatus(backendStatus: string): string {
@@ -821,7 +837,6 @@ export default function Referrals() {
                       <p className="font-medium text-success">
                         +${referral.bonusEarned.toFixed(2)}
                       </p>
-                      <p className="text-xs text-muted-foreground">1.0% rate</p>
                     </TableCell>
                     <TableCell>
                       <p className="text-sm text-foreground">

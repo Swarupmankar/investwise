@@ -58,25 +58,40 @@ export const referralApi = baseApi.injectEndpoints({
         const payload = (res ?? {}) as any;
         const rawItems = Array.isArray(payload.items) ? payload.items : [];
 
-        // Normalize and ensure dates are strings (ISO), not Date objects
-        const items = rawItems.map((it: any) => ({
-          id: Number(it.id ?? 0),
-          userName: it.userName ? String(it.userName) : "",
-          userEmail: it.userEmail ? String(it.userEmail) : "",
-          investmentId: Number(it.investmentId ?? 0),
-          // keep amounts as strings
-          investmentAmount:
-            it.investmentAmount !== undefined && it.investmentAmount !== null
-              ? String(it.investmentAmount)
-              : "0",
-          // ensure date fields are strings (ISO); do NOT convert to Date here
-          dateInvestmentCreated: it.dateInvestmentCreated
-            ? String(it.dateInvestmentCreated)
-            : "",
-          createdAt: it.createdAt ? String(it.createdAt) : "",
-          status: it.status ? String(it.status) : "",
-          transactionType: it.transactionType ? String(it.transactionType) : "",
-        }));
+        const items = rawItems.map((it: any) => {
+          const backendAmount =
+            it.amount !== undefined && it.amount !== null
+              ? String(it.amount)
+              : "0";
+
+          return {
+            id: Number(it.id ?? 0),
+            userName: it.userName ? String(it.userName) : "",
+            userEmail: it.userEmail ? String(it.userEmail) : "",
+            investmentId: Number(it.investmentId ?? 0),
+
+            // keep amounts as strings
+            investmentAmount:
+              it.investmentAmount !== undefined && it.investmentAmount !== null
+                ? String(it.investmentAmount)
+                : "0",
+
+            // ✅ commission from backend, exposed under all likely keys
+            amount: backendAmount,
+            commissionEarned: backendAmount,
+            commission: backendAmount,
+
+            // dates as strings
+            dateInvestmentCreated: it.dateInvestmentCreated
+              ? String(it.dateInvestmentCreated)
+              : "",
+            createdAt: it.createdAt ? String(it.createdAt) : "",
+            status: it.status ? String(it.status) : "",
+            transactionType: it.transactionType
+              ? String(it.transactionType)
+              : "",
+          };
+        });
 
         return { items } as ReferralCommissionHistoryResponse;
       },

@@ -1,16 +1,7 @@
 // QuestionnaireModal.tsx + InvestorQuestionnaire.tsx
-// Replace your existing two files with this single file (or split into two files as appropriate).
-
 import React, { useEffect, useRef, useState } from "react";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { AlertTriangle, CheckCircle } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -28,17 +19,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Calendar } from "@/components/ui/calendar";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { CalendarIcon, ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
-
-import { useToast } from "@/components/ui/use-toast";
 
 export interface QuestionnaireData {
   fullName: string;
@@ -113,15 +96,91 @@ const InvestorQuestionnaire = ({
     defaultFormData()
   );
 
-  // refs are not required for every field; we'll use DOM query focusing by data-question-id
+  // Date selection state
+  const [dateParts, setDateParts] = useState({
+    day: "",
+    month: "",
+    year: "",
+  });
+
+  // Initialize date parts from formData
+  useEffect(() => {
+    if (formData.dateOfBirth) {
+      const date = formData.dateOfBirth;
+      setDateParts({
+        day: date.getDate().toString(),
+        month: (date.getMonth() + 1).toString(),
+        year: date.getFullYear().toString(),
+      });
+    }
+  }, []);
+
+  // Update formData when date parts change
+  useEffect(() => {
+    if (dateParts.day && dateParts.month && dateParts.year) {
+      const newDate = new Date(
+        parseInt(dateParts.year),
+        parseInt(dateParts.month) - 1,
+        parseInt(dateParts.day)
+      );
+      if (!isNaN(newDate.getTime()) && newDate !== formData.dateOfBirth) {
+        setFormData((prev) => ({ ...prev, dateOfBirth: newDate }));
+      }
+    } else if (formData.dateOfBirth) {
+      setFormData((prev) => ({ ...prev, dateOfBirth: undefined }));
+    }
+  }, [dateParts, formData.dateOfBirth]);
+
+  // Date selection helpers
+  const getYears = () => {
+    const currentYear = new Date().getFullYear();
+    return Array.from({ length: 100 }, (_, i) => currentYear - 17 - i);
+  };
+
+  const getDaysInMonth = (month: number, year: number) => {
+    return new Date(year, month, 0).getDate();
+  };
+
+  const getDays = () => {
+    if (!dateParts.month || !dateParts.year) {
+      return Array.from({ length: 31 }, (_, i) => i + 1);
+    }
+    const daysInMonth = getDaysInMonth(
+      parseInt(dateParts.month),
+      parseInt(dateParts.year)
+    );
+    return Array.from({ length: daysInMonth }, (_, i) => i + 1);
+  };
+
+  const isUnder18 = () => {
+    if (!formData.dateOfBirth) return false;
+    const today = new Date();
+    const minAgeDate = new Date();
+    minAgeDate.setFullYear(today.getFullYear() - 18);
+    return formData.dateOfBirth > minAgeDate;
+  };
+
+  const months = [
+    { value: "1", label: "January" },
+    { value: "2", label: "February" },
+    { value: "3", label: "March" },
+    { value: "4", label: "April" },
+    { value: "5", label: "May" },
+    { value: "6", label: "June" },
+    { value: "7", label: "July" },
+    { value: "8", label: "August" },
+    { value: "9", label: "September" },
+    { value: "10", label: "October" },
+    { value: "11", label: "November" },
+    { value: "12", label: "December" },
+  ];
+
   // apply external jumpToStep
   useEffect(() => {
     if (jumpToStep && jumpToStep >= 1 && jumpToStep <= totalSteps) {
       setCurrentStep(jumpToStep);
-      // small delay then notify parent
       setTimeout(() => {
         onJumpHandled?.();
-        // scroll top so the error block is visible in modal parent
         const container = document.querySelector(".investor-questionnaire-top");
         if (container)
           (container as HTMLElement).scrollIntoView({
@@ -130,8 +189,7 @@ const InvestorQuestionnaire = ({
           });
       }, 120);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jumpToStep]);
+  }, [jumpToStep, onJumpHandled]);
 
   // notify parent of data changes
   useEffect(() => {
@@ -141,18 +199,15 @@ const InvestorQuestionnaire = ({
   // when invalidQuestionIds / focusInvalidSignal change, try to focus first invalid element
   useEffect(() => {
     if (!invalidQuestionIds || invalidQuestionIds.length === 0) return;
-    // find the first invalid question id and focus its first focusable child
     const first = invalidQuestionIds[0];
     const wrapper = document.querySelector(
-      `[data-question-id=\"${first}\"]`
+      `[data-question-id="${first}"]`
     ) as HTMLElement | null;
     if (wrapper) {
-      // find focusable element
       const focusable = wrapper.querySelector(
         'input, textarea, button, select, [role="combobox"]'
       ) as HTMLElement | null;
       focusable?.focus();
-      // highlight briefly (tailwind classes used above also show red border)
     }
   }, [invalidQuestionIds, focusInvalidSignal]);
 
@@ -161,6 +216,13 @@ const InvestorQuestionnaire = ({
     value: string | Date | undefined
   ) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleDatePartChange = (
+    part: "day" | "month" | "year",
+    value: string
+  ) => {
+    setDateParts((prev) => ({ ...prev, [part]: value }));
   };
 
   const handleNext = () => {
@@ -179,8 +241,6 @@ const InvestorQuestionnaire = ({
   // helpers to check invalid state for a questionId
   const isInvalid = (questionId: number) =>
     invalidQuestionIds?.includes(questionId);
-
-  // For each group, add `data-question-id` to wrapper and apply red styles to the form control when invalid
 
   const renderStep1 = () => (
     <div className="space-y-4">
@@ -221,42 +281,104 @@ const InvestorQuestionnaire = ({
       </div>
 
       <div data-question-id="3" className="space-y-2">
-        <Label className={isInvalid(3) ? "text-red-600" : ""}>
+        <Label className={cn("block mb-3", isInvalid(3) ? "text-red-600" : "")}>
           3. What is your date of birth as per your official identification
           documents?
         </Label>
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button
-              variant="outline"
-              className={cn(
-                "w-full justify-start text-left font-normal",
-                !formData.dateOfBirth && "text-muted-foreground",
-                isInvalid(3) ? "border-red-500 ring-1 ring-red-500" : ""
-              )}
-              aria-label="Pick date of birth"
+
+        <div className="grid grid-cols-3 gap-3">
+          {/* Month Selector */}
+          <div className="space-y-2">
+            <Select
+              value={dateParts.month}
+              onValueChange={(value) => handleDatePartChange("month", value)}
             >
-              <CalendarIcon className="mr-2 h-4 w-4" />
-              {formData.dateOfBirth ? (
-                format(formData.dateOfBirth, "PPP")
-              ) : (
-                <span>Pick a date</span>
-              )}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-auto p-0" align="start">
-            <Calendar
-              mode="single"
-              selected={formData.dateOfBirth}
-              onSelect={(date) => handleInputChange("dateOfBirth", date)}
-              disabled={(date) =>
-                date > new Date() || date < new Date("1900-01-01")
-              }
-              initialFocus
-              className={cn("p-3 pointer-events-auto")}
-            />
-          </PopoverContent>
-        </Popover>
+              <SelectTrigger
+                className={cn(
+                  isInvalid(3) ? "border-red-500 ring-1 ring-red-500" : ""
+                )}
+              >
+                <SelectValue placeholder="Month" />
+              </SelectTrigger>
+              <SelectContent>
+                {months.map((month) => (
+                  <SelectItem key={month.value} value={month.value}>
+                    {month.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Day Selector */}
+          <div className="space-y-2">
+            <Select
+              value={dateParts.day}
+              onValueChange={(value) => handleDatePartChange("day", value)}
+            >
+              <SelectTrigger
+                className={cn(
+                  isInvalid(3) ? "border-red-500 ring-1 ring-red-500" : ""
+                )}
+              >
+                <SelectValue placeholder="Day" />
+              </SelectTrigger>
+              <SelectContent>
+                {getDays().map((day) => (
+                  <SelectItem key={day} value={day.toString()}>
+                    {day}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Year Selector */}
+          <div className="space-y-2">
+            <Select
+              value={dateParts.year}
+              onValueChange={(value) => handleDatePartChange("year", value)}
+            >
+              <SelectTrigger
+                className={cn(
+                  isInvalid(3) ? "border-red-500 ring-1 ring-red-500" : ""
+                )}
+              >
+                <SelectValue placeholder="Year" />
+              </SelectTrigger>
+              <SelectContent>
+                {getYears().map((year) => (
+                  <SelectItem key={year} value={year.toString()}>
+                    {year}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        {/* Selected Date Display */}
+        {formData.dateOfBirth && (
+          <div className="mt-2 p-2 bg-muted rounded-md text-sm">
+            <span className="font-medium">Selected date: </span>
+            {format(formData.dateOfBirth, "MMMM d, yyyy")}
+          </div>
+        )}
+
+        {/* Age Validation Warning */}
+        {formData.dateOfBirth && isUnder18() && (
+          <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded-md text-sm text-red-600">
+            <AlertTriangle className="h-4 w-4 inline mr-1" />
+            You must be at least 18 years old to register
+          </div>
+        )}
+
+        {/* Required Field Hint */}
+        {!formData.dateOfBirth && isInvalid(3) && (
+          <div className="mt-1 text-sm text-red-600">
+            Please select your date of birth
+          </div>
+        )}
       </div>
 
       <div data-question-id="4" className="space-y-2">

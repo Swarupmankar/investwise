@@ -1,5 +1,4 @@
-// src/pages/Deposit.tsx
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -18,21 +17,70 @@ import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogClose } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import QRCode from "react-qr-code"; // ← NEW
 
 import {
   useGetTransactionsQuery,
   useCreateDepositTransactionMutation,
-  useGetDepositWalletQuery, // <-- new hook to fetch active wallet
+  useGetDepositWalletQuery,
 } from "@/API/transactions.api";
 
+// --- Helpers for TRON address parsing/validation -----------------------------
+const BASE58_REGEX = /^[1-9A-HJ-NP-Za-km-z]+$/;
+
+/**
+ * Accepts either:
+ *  - a raw TRON address like "T..." (Base58, length 34)
+ *  - a "wallet link" URL that contains a TRON address somewhere (path or query)
+ * Returns the extracted candidate address or "" if none.
+ */
+function extractTronAddress(input: string | undefined | null): string {
+  if (!input) return "";
+  const s = String(input).trim();
+
+  // If it's already a TRON-looking address, return it.
+  if (/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(s)) return s;
+
+  // Try to parse as URL and find a T-address in path/query
+  try {
+    const url = new URL(s);
+    // Check path segments for a T-address
+    const pathParts = url.pathname.split("/").filter(Boolean);
+    for (const part of pathParts) {
+      if (/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(part)) return part;
+    }
+    // Check query params
+    for (const [_, value] of url.searchParams.entries()) {
+      if (/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(value)) return value;
+    }
+  } catch {
+    // Not a URL; fall through
+  }
+
+  return "";
+}
+
+/**
+ * Basic client-side format check for TRON Base58Check address.
+ * (Length/charset/leading 'T'. Not cryptographically verifying checksum.)
+ */
+function isValidTronAddress(addr: string): boolean {
+  return (
+    typeof addr === "string" &&
+    addr.length === 34 &&
+    addr.startsWith("T") &&
+    BASE58_REGEX.test(addr)
+  );
+}
+// ---------------------------------------------------------------------------
+
 export default function Deposit() {
-  // remove static walletAddress state; we will fetch it
   const [transactionId, setTransactionId] = useState("");
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [amount, setAmount] = useState<string>("");
   const { toast } = useToast();
 
-  // fetch wallet address
+  // fetch wallet address / link from API
   const {
     data: depositWalletResp,
     isLoading: walletLoading,
@@ -41,7 +89,15 @@ export default function Deposit() {
     refetch: refetchWallet,
   } = useGetDepositWalletQuery();
 
-  const walletAddress = depositWalletResp?.address ?? "";
+  // Raw value from server (could be a URL or plain address)
+  const walletRaw = depositWalletResp?.address ?? "";
+
+  // Extract & validate a TRON address for QR + display
+  const tronAddress = useMemo(() => extractTronAddress(walletRaw), [walletRaw]);
+  const tronAddressValid = useMemo(
+    () => isValidTronAddress(tronAddress),
+    [tronAddress]
+  );
 
   // fetch history from API
   const {
@@ -52,11 +108,9 @@ export default function Deposit() {
     refetch: refetchHistory,
   } = useGetTransactionsQuery();
 
-  // create deposit mutation (expects FormData)
   const [createDeposit, { isLoading: creating }] =
     useCreateDepositTransactionMutation();
 
-  // image modal state
   const [openImageUrl, setOpenImageUrl] = useState<string | null>(null);
 
   const copyToClipboard = async (text: string) => {
@@ -100,7 +154,6 @@ export default function Deposit() {
     return variants[status] ?? "bg-muted text-muted-foreground border-border";
   };
 
-  // validate inputs and show toasts if missing
   const validate = () => {
     const minAmount = 100;
     if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
@@ -141,7 +194,6 @@ export default function Deposit() {
   const handleSubmit = async () => {
     if (!validate()) return;
 
-    // construct FormData
     const fd = new FormData();
     fd.append("amount", String(Number(amount)));
     fd.append("txId", transactionId.trim());
@@ -157,12 +209,9 @@ export default function Deposit() {
         ).toLocaleString()} has been submitted.`,
       });
 
-      // reset fields
       setAmount("");
       setTransactionId("");
       setProofFile(null);
-
-      // RTK invalidation should refetch history automatically
       refetchHistory();
     } catch (err: any) {
       const serverMessage =
@@ -176,7 +225,6 @@ export default function Deposit() {
     }
   };
 
-  // only deposits (backend returns deposits & withdrawls)
   const deposits = transactionsResp?.deposits ?? [];
 
   return (
@@ -201,12 +249,44 @@ export default function Deposit() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+              {/* QR AREA */}
               <div className="flex justify-center">
-                <div className="h-48 w-48 bg-muted rounded-lg flex items-center justify-center">
-                  <QrCode className="h-16 w-16 text-muted-foreground" />
+                <div
+                  className={cn(
+                    "h-48 w-48 rounded-lg flex items-center justify-center border border-border bg-muted",
+                    (walletLoading || walletFetching) && "animate-pulse"
+                  )}
+                  aria-label={
+                    walletError
+                      ? "QR unavailable due to error"
+                      : tronAddressValid
+                      ? "Wallet QR code"
+                      : "QR not available"
+                  }
+                >
+                  {walletLoading || walletFetching ? (
+                    <Skeleton className="h-40 w-40" />
+                  ) : walletError || !tronAddressValid ? (
+                    // Blank field (no QR) when invalid or error
+                    <div className="flex flex-col items-center justify-center text-muted-foreground">
+                      <QrCode className="h-10 w-10 opacity-50" />
+                      <span className="text-xs mt-1">QR not available</span>
+                    </div>
+                  ) : (
+                    // Valid address -> live QR code
+                    <div className="p-3 bg-white rounded-md">
+                      <QRCode
+                        value={tronAddress}
+                        size={160}
+                        level="M"
+                        aria-label="TRON deposit QR"
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
 
+              {/* Address field */}
               <div className="space-y-2">
                 <Label className="text-card-foreground">Wallet Address</Label>
                 <div className="flex gap-2">
@@ -234,16 +314,29 @@ export default function Deposit() {
                   ) : (
                     <>
                       <Input
-                        value={walletAddress}
+                        value={tronAddressValid ? tronAddress : ""}
+                        placeholder={
+                          tronAddressValid ? "" : "Awaiting valid TRON address…"
+                        }
                         readOnly
-                        className="bg-input border-border text-foreground font-mono text-sm"
+                        className={cn(
+                          "bg-input border-border font-mono text-sm",
+                          !tronAddressValid && "text-muted-foreground"
+                        )}
                       />
                       <Button
-                        onClick={() => copyToClipboard(walletAddress)}
+                        onClick={() =>
+                          copyToClipboard(tronAddressValid ? tronAddress : "")
+                        }
                         variant="outline"
                         className="border-border"
-                        disabled={!walletAddress}
-                        aria-disabled={!walletAddress}
+                        disabled={!tronAddressValid}
+                        aria-disabled={!tronAddressValid}
+                        title={
+                          tronAddressValid
+                            ? "Copy address"
+                            : "No address to copy"
+                        }
                       >
                         <Copy className="h-4 w-4" />
                       </Button>

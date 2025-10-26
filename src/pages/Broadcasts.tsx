@@ -1,4 +1,3 @@
-// src/pages/Broadcasts.tsx
 import { useEffect, useMemo, useState, useRef } from "react";
 import {
   Card,
@@ -36,7 +35,6 @@ import { useGetReportsQuery } from "@/API/reports.api";
 import type { ReportNormalized } from "@/types/report/report.types";
 
 const LAST_READ_KEY = "broadcast_last_read_id";
-const FILENAME_TOOLTIP_DELAY = 200;
 
 function extFromUrl(url?: string) {
   if (!url) return "";
@@ -68,7 +66,7 @@ function iconForType(ext: string) {
   if (t === "pdf") return <FileText className="h-5 w-5" aria-hidden />;
   if (["csv", "xlsx", "xls"].includes(t))
     return <FileSpreadsheet className="h-5 w-5" aria-hidden />;
-  if (["jpg", "jpeg", "png", "gif", "webp"].includes(t))
+  if (["jpg", "jpeg", "png", "gif", "webp", "bmp", "avif"].includes(t))
     return <ImageIcon className="h-5 w-5" aria-hidden />;
   return <File className="h-5 w-5" aria-hidden />;
 }
@@ -77,6 +75,71 @@ async function fetchAsBlob(url: string): Promise<Blob> {
   const res = await fetch(url, { mode: "cors", credentials: "include" });
   if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
   return await res.blob();
+}
+
+/** Banner with Skeleton (loading) and Placeholder (error/empty) */
+function BannerImage({
+  url,
+  alt,
+  onClick,
+}: {
+  url: string;
+  alt: string;
+  onClick?: () => void;
+}) {
+  const [loading, setLoading] = useState(Boolean(url));
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    setLoading(Boolean(url));
+    setError(false);
+  }, [url]);
+
+  const showPlaceholder = !url || error;
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-border/50 bg-muted/5">
+      <AspectRatio ratio={16 / 9}>
+        {/* LOADING: skeleton covers area until image is ready */}
+        {loading && !showPlaceholder && (
+          <div className="h-full w-full">
+            <Skeleton className="h-full w-full rounded-none" />
+          </div>
+        )}
+
+        {/* IMAGE */}
+        {!showPlaceholder && (
+          <img
+            src={url}
+            alt={alt}
+            loading="lazy"
+            decoding="async"
+            className={`h-full w-full object-cover ${
+              onClick ? "cursor-zoom-in" : ""
+            } ${loading ? "invisible" : "visible"}`}
+            onLoad={() => setLoading(false)}
+            onError={() => {
+              setLoading(false);
+              setError(true);
+            }}
+            onClick={onClick}
+          />
+        )}
+
+        {/* PLACEHOLDER */}
+        {showPlaceholder && (
+          <div className="h-full w-full flex flex-col items-center justify-center gap-2 bg-muted/20">
+            <div className="p-3 rounded-md bg-background border">
+              <ImageIcon className="h-8 w-8 text-muted-foreground" />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {url ? "Image failed to load" : "No banner"}
+            </p>
+          </div>
+        )}
+      </AspectRatio>
+    </div>
+  );
 }
 
 export default function Broadcasts() {
@@ -99,13 +162,12 @@ export default function Broadcasts() {
   );
 
   const latest = posts[0] ?? null;
-  const recent = posts.slice(1, 4);
   const [detailOpen, setDetailOpen] = useState(false);
   const [selectedPost, setSelectedPost] = useState<ReportNormalized | null>(
     null
   );
 
-  // viewer state
+  // viewer state (used for banner/image preview)
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerUrl, setViewerUrl] = useState<string | null>(null); // blob: or original url
   const viewerTypeRef = useRef<"pdf" | "image" | "other" | null>(null);
@@ -127,7 +189,7 @@ export default function Broadcasts() {
       latest && !isRead ? "Broadcast & Reports • New" : "Broadcast & Reports"
     } | VaultPro`;
     const descContent =
-      "Latest admin broadcast and downloadable reports for your account.";
+      "Latest admin broadcast with banner and downloadable report for your account.";
     let meta = document.querySelector(
       'meta[name="description"]'
     ) as HTMLMetaElement | null;
@@ -151,7 +213,15 @@ export default function Broadcasts() {
     if (!url) return;
     const ext = extFromUrl(url);
     const isPdf = ext === "pdf";
-    const isImage = ["jpg", "jpeg", "png", "gif", "webp"].includes(ext);
+    const isImage = [
+      "jpg",
+      "jpeg",
+      "png",
+      "gif",
+      "webp",
+      "bmp",
+      "avif",
+    ].includes(ext);
 
     try {
       const blob = await fetchAsBlob(url);
@@ -161,7 +231,7 @@ export default function Broadcasts() {
       viewerTypeRef.current = isPdf ? "pdf" : isImage ? "image" : "other";
       setViewerOpen(true);
       return;
-    } catch (err) {
+    } catch {
       if (isImage) {
         setViewerUrl(url);
         viewerTypeRef.current = "image";
@@ -209,9 +279,9 @@ export default function Broadcasts() {
           );
         } catch {}
       }, 15_000);
-    } catch (err) {
+    } catch {
       toast({
-        title: "Download Downlaoding",
+        title: "Downloading",
         description: "Opening link so you can download the file.",
       });
       window.open(url, "_blank", "noopener");
@@ -251,7 +321,8 @@ export default function Broadcasts() {
             )}
           </div>
           <p className="mt-2 text-sm text-muted-foreground max-w-2xl">
-            Read the latest admin broadcast and download attached reports.
+            Read the latest admin broadcast (with banner) and download the
+            attached report.
           </p>
         </div>
       </header>
@@ -329,12 +400,21 @@ export default function Broadcasts() {
           <div className="space-y-6">
             {posts.map((post, idx) => {
               const isTop = idx === 0;
+
               const fileUrl = post.fileUrl ?? "";
-              const ext = (post.fileExt || extFromUrl(fileUrl)).toLowerCase();
-              const isImage =
+              const fileExt = (
+                post.fileExt || extFromUrl(fileUrl)
+              ).toLowerCase();
+              const isFileImage =
                 post.isImage ||
-                ["jpg", "jpeg", "png", "gif", "webp"].includes(ext);
-              const isPdf = post.isPdf || ext === "pdf";
+                ["jpg", "jpeg", "png", "gif", "webp", "bmp", "avif"].includes(
+                  fileExt
+                );
+              const isFilePdf = post.isPdf || fileExt === "pdf";
+
+              // Banner (URL may be empty if backend gave only name we can't resolve)
+              const bannerUrl = post.bannerUrl;
+              const hasBanner = post.hasBanner;
 
               return (
                 <Card
@@ -370,60 +450,15 @@ export default function Broadcasts() {
                       {post.title}
                     </CardTitle>
 
-                    <div className="mt-3 overflow-hidden rounded-lg border border-border/50 bg-muted/5">
-                      <AspectRatio ratio={16 / 9}>
-                        {isImage ? (
-                          <img
-                            src={fileUrl}
-                            alt={post.title}
-                            loading="lazy"
-                            decoding="async"
-                            className="h-full w-full object-contain cursor-zoom-in"
-                            onClick={() => openViewer(fileUrl)}
-                          />
-                        ) : isPdf ? (
-                          <div className="h-full w-full flex flex-col items-center justify-center gap-4 p-4">
-                            <div className="p-3 rounded-md bg-background border">
-                              <FileText className="h-8 w-8" />
-                            </div>
-                            <div className="text-center">
-                              <p className="text-sm font-semibold text-foreground mb-1">
-                                {post.fileName}
-                              </p>
-                              <p className="text-xs text-muted-foreground">
-                                PDF report
-                              </p>
-                            </div>
-                            <div className="flex gap-2 pt-2">
-                              <Button
-                                className="hover:shadow-lg"
-                                size="sm"
-                                variant="default"
-                                onClick={() =>
-                                  downloadResource(fileUrl, post.fileName)
-                                }
-                              >
-                                <Download className="h-4 w-4 mr-2" />
-                                Download
-                              </Button>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="h-full w-full flex items-center justify-center gap-3 p-4">
-                            <div className="p-3 rounded-md bg-background border">
-                              {iconForType(ext)}
-                            </div>
-                            <div className="text-left">
-                              <p className="text-sm font-medium text-foreground">
-                                {post.fileName}
-                              </p>
-                              <p className="text-xs text-muted-foreground">
-                                Attachment
-                              </p>
-                            </div>
-                          </div>
-                        )}
-                      </AspectRatio>
+                    {/* BANNER PREVIEW: always render area with skeleton/placeholder */}
+                    <div className="mt-1">
+                      <BannerImage
+                        url={hasBanner ? bannerUrl : ""}
+                        alt={`${post.title} banner`}
+                        onClick={
+                          hasBanner ? () => openViewer(bannerUrl) : undefined
+                        }
+                      />
                     </div>
 
                     <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
@@ -443,15 +478,16 @@ export default function Broadcasts() {
                       </p>
                     </article>
 
+                    {/* FILE SECTION */}
                     <section aria-label="Report file" className="space-y-3">
                       <h3 className="text-sm font-medium text-foreground">
-                        Report
+                        Attachment
                       </h3>
 
                       <div className="flex items-center justify-between gap-3 p-3 rounded border border-border/40 bg-muted/20">
                         <div className="flex items-center gap-3 min-w-0">
                           <div className="h-10 w-10 flex items-center justify-center rounded-md bg-background border">
-                            {iconForType(ext)}
+                            {iconForType(fileExt)}
                           </div>
                           <div className="min-w-0">
                             <p
@@ -461,48 +497,18 @@ export default function Broadcasts() {
                               {post.fileName}
                             </p>
                             <p className="text-xs text-muted-foreground">
-                              {ext.toUpperCase()}
+                              {fileExt ? fileExt.toUpperCase() : "FILE"}
                             </p>
                           </div>
                         </div>
 
-                        <div className="flex  items-center gap-2">
-                          {isPdf && (
-                            <>
-                              <Button
-                                className="hover:shadow-lg"
-                                size="sm"
-                                variant="default"
-                                onClick={() =>
-                                  downloadResource(fileUrl, post.fileName)
-                                }
-                              >
-                                <Download className="h-4 w-4 mr-2" />
-                                Download
-                              </Button>
-                            </>
-                          )}
-
-                          {isImage && (
-                            <>
-                              <Button
-                                className="hover:shadow-lg"
-                                size="sm"
-                                variant="default"
-                                onClick={() =>
-                                  downloadResource(fileUrl, post.fileName)
-                                }
-                              >
-                                <Download className="h-4 w-4 mr-2" />
-                                Download
-                              </Button>
-                            </>
-                          )}
-
-                          {!isPdf && !isImage && (
+                        <div className="flex items-center gap-2">
+                          {/* PDFs: Download only */}
+                          {isFilePdf && (
                             <Button
+                              className="hover:shadow-lg"
                               size="sm"
-                              variant="secondary"
+                              variant="default"
                               onClick={() =>
                                 downloadResource(fileUrl, post.fileName)
                               }
@@ -510,6 +516,33 @@ export default function Broadcasts() {
                               <Download className="h-4 w-4 mr-2" />
                               Download
                             </Button>
+                          )}
+
+                          {/* Images or others */}
+                          {!isFilePdf && (
+                            <>
+                              {isFileImage && (
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  onClick={() => openViewer(fileUrl)}
+                                >
+                                  <ImageIcon className="h-4 w-4 mr-2" />
+                                  Preview
+                                </Button>
+                              )}
+                              <Button
+                                className="hover:shadow-lg"
+                                size="sm"
+                                variant="default"
+                                onClick={() =>
+                                  downloadResource(fileUrl, post.fileName)
+                                }
+                              >
+                                <Download className="h-4 w-4 mr-2" />
+                                Download
+                              </Button>
+                            </>
                           )}
                         </div>
                       </div>
@@ -521,7 +554,7 @@ export default function Broadcasts() {
           </div>
         )}
 
-        {/* Detail dialog for history item */}
+        {/* Detail dialog */}
         <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
           <DialogContent className="sm:max-w-lg">
             {selectedPost && (
@@ -534,20 +567,29 @@ export default function Broadcasts() {
                     {selectedPost.createdAt.toLocaleString()}
                   </DialogDescription>
                 </DialogHeader>
+
                 <div className="space-y-4 mt-2">
                   <p className="text-sm text-muted-foreground whitespace-pre-wrap">
                     {selectedPost.summary}
                   </p>
 
+                  {/* Banner uses the same resilient component */}
+                  <BannerImage
+                    url={selectedPost.hasBanner ? selectedPost.bannerUrl : ""}
+                    alt={`${selectedPost.title} banner`}
+                    onClick={
+                      selectedPost.hasBanner
+                        ? () => openViewer(selectedPost.bannerUrl)
+                        : undefined
+                    }
+                  />
+
                   <div className="space-y-2">
-                    <h4 className="text-sm font-medium">Report</h4>
+                    <h4 className="text-sm font-medium">Attachment</h4>
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex items-center gap-3">
                         <div className="h-8 w-8 flex items-center justify-center rounded-md bg-muted">
-                          {iconForType(
-                            selectedPost.fileExt ||
-                              extFromUrl(selectedPost.fileUrl)
-                          )}
+                          {iconForType(selectedPost.fileExt)}
                         </div>
                         <div>
                           <p
@@ -557,10 +599,7 @@ export default function Broadcasts() {
                             {selectedPost.fileName}
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            {(
-                              selectedPost.fileExt ||
-                              extFromUrl(selectedPost.fileUrl)
-                            ).toUpperCase()}
+                            {selectedPost.fileExt.toUpperCase()}
                           </p>
                         </div>
                       </div>
@@ -574,7 +613,7 @@ export default function Broadcasts() {
                           )
                         }
                       >
-                        <Download className="h-4 w-4" />
+                        <Download className="h-4 w-4 mr-2" />
                         Download
                       </Button>
                     </div>
@@ -591,6 +630,48 @@ export default function Broadcasts() {
           </DialogContent>
         </Dialog>
       </main>
+
+      {/* Simple viewer dialog for images / pdf */}
+      <Dialog open={viewerOpen} onOpenChange={setViewerOpen}>
+        <DialogContent className="sm:max-w-3xl">
+          {viewerTypeRef.current === "image" && viewerUrl && (
+            <img
+              src={viewerUrl}
+              alt="Preview"
+              className="max-h-[75vh] w-full object-contain rounded"
+            />
+          )}
+          {viewerTypeRef.current === "pdf" && viewerUrl && (
+            <iframe
+              src={viewerUrl}
+              className="w-full h-[75vh] rounded"
+              title="PDF Preview"
+            />
+          )}
+          {viewerTypeRef.current === "other" && (
+            <p className="text-sm text-muted-foreground">
+              Preview not available.
+            </p>
+          )}
+          <DialogFooter className="mt-2">
+            {viewerUrl && (
+              <Button
+                onClick={() => downloadResource(viewerUrl)}
+                variant="default"
+                size="sm"
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Download
+              </Button>
+            )}
+            <DialogClose asChild>
+              <Button variant="secondary" size="sm">
+                Close
+              </Button>
+            </DialogClose>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

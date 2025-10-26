@@ -25,6 +25,10 @@ export interface ReferralCommissionItem {
   status: string;
   transactionType: string;
   createdAt: string;
+
+  amount: string; // raw from backend
+  commissionEarned: string; // preferred in code
+  commission: string;
 }
 
 export interface ReferralCommissionHistoryResponse {

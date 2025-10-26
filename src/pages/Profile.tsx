@@ -998,7 +998,7 @@ export default function Profile() {
       </Tabs>
 
       {/* Danger Zone unchanged */}
-      <Card className="bg-card border-destructive/20">
+      {/* <Card className="bg-card border-destructive/20">
         <CardHeader>
           <CardTitle className="text-destructive">Danger Zone</CardTitle>
         </CardHeader>
@@ -1013,7 +1013,7 @@ export default function Profile() {
             <Button variant="destructive">Delete Account</Button>
           </div>
         </CardContent>
-      </Card>
+      </Card> */}
 
       {/* toast */}
       {toast && (

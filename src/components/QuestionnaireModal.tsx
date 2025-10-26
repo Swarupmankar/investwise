@@ -14,6 +14,7 @@ import InvestorQuestionnaire, {
 } from "@/components/InvestorQuestionnaire";
 import { useSaveAnswersMutation } from "@/API/onbording.api";
 import { useToast } from "@/hooks/use-toast";
+import { Calendar } from "@/components/ui/calendar";
 
 interface QuestionnaireModalProps {
   isOpen: boolean;
