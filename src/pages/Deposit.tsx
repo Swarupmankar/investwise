@@ -28,42 +28,26 @@ import {
 // --- Helpers for TRON address parsing/validation -----------------------------
 const BASE58_REGEX = /^[1-9A-HJ-NP-Za-km-z]+$/;
 
-/**
- * Accepts either:
- *  - a raw TRON address like "T..." (Base58, length 34)
- *  - a "wallet link" URL that contains a TRON address somewhere (path or query)
- * Returns the extracted candidate address or "" if none.
- */
 function extractTronAddress(input: string | undefined | null): string {
   if (!input) return "";
   const s = String(input).trim();
 
-  // If it's already a TRON-looking address, return it.
   if (/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(s)) return s;
 
-  // Try to parse as URL and find a T-address in path/query
   try {
     const url = new URL(s);
-    // Check path segments for a T-address
     const pathParts = url.pathname.split("/").filter(Boolean);
     for (const part of pathParts) {
       if (/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(part)) return part;
     }
-    // Check query params
     for (const [_, value] of url.searchParams.entries()) {
       if (/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(value)) return value;
     }
-  } catch {
-    // Not a URL; fall through
-  }
+  } catch {}
 
   return "";
 }
 
-/**
- * Basic client-side format check for TRON Base58Check address.
- * (Length/charset/leading 'T'. Not cryptographically verifying checksum.)
- */
 function isValidTronAddress(addr: string): boolean {
   return (
     typeof addr === "string" &&
@@ -72,7 +56,6 @@ function isValidTronAddress(addr: string): boolean {
     BASE58_REGEX.test(addr)
   );
 }
-// ---------------------------------------------------------------------------
 
 export default function Deposit() {
   const [transactionId, setTransactionId] = useState("");
@@ -89,17 +72,13 @@ export default function Deposit() {
     refetch: refetchWallet,
   } = useGetDepositWalletQuery();
 
-  // Raw value from server (could be a URL or plain address)
   const walletRaw = depositWalletResp?.address ?? "";
-
-  // Extract & validate a TRON address for QR + display
   const tronAddress = useMemo(() => extractTronAddress(walletRaw), [walletRaw]);
   const tronAddressValid = useMemo(
     () => isValidTronAddress(tronAddress),
     [tronAddress]
   );
 
-  // fetch history from API
   const {
     data: transactionsResp,
     isLoading: historyLoading,

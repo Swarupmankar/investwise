@@ -1,11 +1,10 @@
-// src/api/axiosBaseQuery.ts
 import type { BaseQueryFn } from "@reduxjs/toolkit/query";
 import type { AxiosRequestConfig, AxiosError } from "axios";
 import api from "./axiosInstance";
 
 type AxiosBaseQueryArgs = {
   url: string;
-  method?: AxiosRequestConfig["method"]; // <-- optional now
+  method?: AxiosRequestConfig["method"]; 
   data?: AxiosRequestConfig["data"];
   params?: AxiosRequestConfig["params"];
   headers?: AxiosRequestConfig["headers"];

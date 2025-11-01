@@ -57,7 +57,7 @@ function resolveBannerUrl(bannerName?: string, hintFileUrl?: string): string {
   // already a full URL or data url
   if (/^(https?:)?\/\//i.test(name) || /^data:/i.test(name)) return name;
 
-  // 1) same directory as the fileUrl (common case)
+  // 1) same directory as the fileUrl
   const dir = dirnameFromUrl(hintFileUrl);
   if (dir) return dir + name;
 
@@ -67,11 +67,10 @@ function resolveBannerUrl(bannerName?: string, hintFileUrl?: string): string {
     (import.meta as any)?.env?.VITE_BANNER_BASE ||
     "";
   if (base) {
-    // ensure single slash join
     return base.replace(/\/+$/, "") + "/" + name.replace(/^\/+/, "");
   }
 
-  // 3) cannot resolve → return empty so UI shows placeholder
+  // 3) cannot resolve
   return "";
 }
 
@@ -91,9 +90,12 @@ export const reportApi = baseApi.injectEndpoints({
           const fileUrl = safeString(r.fileUrl);
           const fileName = fileNameFromUrl(fileUrl);
           const fileExt = extFromUrl(fileUrl);
-          const createdAt = r.createdAt
-            ? new Date(String(r.createdAt))
-            : new Date();
+
+          // IMPORTANT: keep it a string in Redux
+          const createdAt: string = r.createdAt
+            ? String(r.createdAt)
+            : new Date().toISOString();
+
           const isPdf = fileExt === "pdf";
           const isImage = [
             "jpg",
@@ -105,9 +107,11 @@ export const reportApi = baseApi.injectEndpoints({
             "avif",
           ].includes(fileExt);
 
-          // banner: only name from backend
+          // Prefer explicit bannerUrl, else try name (or typo "baner") and resolve
+          const explicitBannerUrl = safeString((r as any).bannerUrl);
           const bannerName = safeString((r as any).banner ?? (r as any).baner);
-          const bannerUrl = resolveBannerUrl(bannerName, fileUrl);
+          const bannerUrl =
+            explicitBannerUrl || resolveBannerUrl(bannerName, fileUrl);
           const hasBanner = !!bannerUrl;
 
           return {
@@ -128,7 +132,11 @@ export const reportApi = baseApi.injectEndpoints({
           } as ReportNormalized;
         });
 
-        parsed.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        // sort by createdAt (string → Date only here)
+        parsed.sort(
+          (a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
         return parsed;
       },
     }),

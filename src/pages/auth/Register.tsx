@@ -316,13 +316,9 @@ const Register = () => {
                     required
                   />
                 </div>
-                {touched.phone && !phoneValid ? (
+                {touched.phone && !phoneValid && (
                   <p role="alert" className="text-xs text-destructive">
                     Enter a 10-digit mobile number (numbers only).
-                  </p>
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    India format (10 digits). We’ll add +91 automatically.
                   </p>
                 )}
               </div>

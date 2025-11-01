@@ -71,10 +71,19 @@ function iconForType(ext: string) {
   return <File className="h-5 w-5" aria-hidden />;
 }
 
+// Default to CORS-safe, cookie-less fetches for public assets
 async function fetchAsBlob(url: string): Promise<Blob> {
-  const res = await fetch(url, { mode: "cors", credentials: "include" });
+  const res = await fetch(url, { mode: "cors", credentials: "omit" });
   if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
   return await res.blob();
+}
+function isSameOrigin(url: string) {
+  try {
+    const u = new URL(url, window.location.href);
+    return u.origin === window.location.origin;
+  } catch {
+    return false;
+  }
 }
 
 /** Banner with Skeleton (loading) and Placeholder (error/empty) */
@@ -100,20 +109,19 @@ function BannerImage({
   return (
     <div className="overflow-hidden rounded-lg border border-border/50 bg-muted/5">
       <AspectRatio ratio={16 / 9}>
-        {/* LOADING: skeleton covers area until image is ready */}
         {loading && !showPlaceholder && (
           <div className="h-full w-full">
             <Skeleton className="h-full w-full rounded-none" />
           </div>
         )}
 
-        {/* IMAGE */}
         {!showPlaceholder && (
           <img
             src={url}
             alt={alt}
             loading="lazy"
             decoding="async"
+            crossOrigin="anonymous"
             className={`h-full w-full object-cover ${
               onClick ? "cursor-zoom-in" : ""
             } ${loading ? "invisible" : "visible"}`}
@@ -126,7 +134,6 @@ function BannerImage({
           />
         )}
 
-        {/* PLACEHOLDER */}
         {showPlaceholder && (
           <div className="h-full w-full flex flex-col items-center justify-center gap-2 bg-muted/20">
             <div className="p-3 rounded-md bg-background border">
@@ -157,7 +164,11 @@ export default function Broadcasts() {
     () =>
       (reports ?? [])
         .slice()
-        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()),
+        // IMPORTANT: createdAt is a string in state; convert only in the component
+        .sort(
+          (a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        ),
     [reports]
   );
 
@@ -223,6 +234,14 @@ export default function Broadcasts() {
       "avif",
     ].includes(ext);
 
+    // If it's an image and cross-origin, don't blob-fetch (avoids CORS/CORP issues)
+    if (isImage && !isSameOrigin(url)) {
+      setViewerUrl(url);
+      viewerTypeRef.current = "image";
+      setViewerOpen(true);
+      return;
+    }
+
     try {
       const blob = await fetchAsBlob(url);
       const blobUrl = URL.createObjectURL(blob);
@@ -230,18 +249,11 @@ export default function Broadcasts() {
       setViewerUrl(blobUrl);
       viewerTypeRef.current = isPdf ? "pdf" : isImage ? "image" : "other";
       setViewerOpen(true);
-      return;
     } catch {
-      if (isImage) {
-        setViewerUrl(url);
-        viewerTypeRef.current = "image";
-        setViewerOpen(true);
-        return;
-      }
-      setViewerUrl(null);
-      viewerTypeRef.current = isPdf ? "pdf" : "other";
+      // last resort: open the original URL (may still be blocked if server sets CORP)
+      setViewerUrl(url);
+      viewerTypeRef.current = isImage ? "image" : isPdf ? "pdf" : "other";
       setViewerOpen(true);
-      return;
     }
   }
 
@@ -258,7 +270,7 @@ export default function Broadcasts() {
         a.remove();
         return;
       }
-      // fetch actual resource as blob
+      // fetch actual resource as blob (no cookies → fewer CORS constraints)
       const blob = await fetchAsBlob(url);
       const blobUrl = URL.createObjectURL(blob);
       createdBlobUrlsRef.current.push(blobUrl);
@@ -280,6 +292,7 @@ export default function Broadcasts() {
         } catch {}
       }, 15_000);
     } catch {
+      // fallback: open in new tab
       toast({
         title: "Downloading",
         description: "Opening link so you can download the file.",
@@ -384,7 +397,6 @@ export default function Broadcasts() {
           </div>
         )}
 
-        {/* Empty (no reports) */}
         {!isLoading && !isError && posts.length === 0 && (
           <Card className="backdrop-blur-xl bg-card/80 border border-border/50 shadow-xl text-center p-8 max-w-3xl mx-auto">
             <div className="mx-auto max-w-sm">
@@ -412,9 +424,8 @@ export default function Broadcasts() {
                 );
               const isFilePdf = post.isPdf || fileExt === "pdf";
 
-              // Banner (URL may be empty if backend gave only name we can't resolve)
+              // Banner URL now comes directly from API/transform
               const bannerUrl = post.bannerUrl;
-              const hasBanner = post.hasBanner;
 
               return (
                 <Card
@@ -428,7 +439,14 @@ export default function Broadcasts() {
                     {isTop && (
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <span className={pillClass} aria-live="polite">
+                          <span
+                            className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ring-1 ${
+                              isRead
+                                ? "bg-success/15 text-success ring-success/30"
+                                : "bg-primary/15 text-primary ring-primary/30"
+                            }`}
+                            aria-live="polite"
+                          >
                             Latest Update
                           </span>
                         </div>
@@ -450,21 +468,21 @@ export default function Broadcasts() {
                       {post.title}
                     </CardTitle>
 
-                    {/* BANNER PREVIEW: always render area with skeleton/placeholder */}
+                    {/* BANNER PREVIEW */}
                     <div className="mt-1">
                       <BannerImage
-                        url={hasBanner ? bannerUrl : ""}
+                        url={bannerUrl}
                         alt={`${post.title} banner`}
                         onClick={
-                          hasBanner ? () => openViewer(bannerUrl) : undefined
+                          bannerUrl ? () => openViewer(bannerUrl) : undefined
                         }
                       />
                     </div>
 
                     <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
                       <Clock className="h-4 w-4" aria-hidden />
-                      <time dateTime={post.createdAt.toISOString()}>
-                        {formatDistanceToNow(post.createdAt, {
+                      <time dateTime={new Date(post.createdAt).toISOString()}>
+                        {formatDistanceToNow(new Date(post.createdAt), {
                           addSuffix: true,
                         })}
                       </time>
@@ -503,7 +521,6 @@ export default function Broadcasts() {
                         </div>
 
                         <div className="flex items-center gap-2">
-                          {/* PDFs: Download only */}
                           {isFilePdf && (
                             <Button
                               className="hover:shadow-lg"
@@ -518,7 +535,6 @@ export default function Broadcasts() {
                             </Button>
                           )}
 
-                          {/* Images or others */}
                           {!isFilePdf && (
                             <>
                               {isFileImage && (
@@ -564,7 +580,7 @@ export default function Broadcasts() {
                     {selectedPost.title}
                   </DialogTitle>
                   <DialogDescription>
-                    {selectedPost.createdAt.toLocaleString()}
+                    {new Date(selectedPost.createdAt).toLocaleString()}
                   </DialogDescription>
                 </DialogHeader>
 
@@ -573,12 +589,11 @@ export default function Broadcasts() {
                     {selectedPost.summary}
                   </p>
 
-                  {/* Banner uses the same resilient component */}
                   <BannerImage
-                    url={selectedPost.hasBanner ? selectedPost.bannerUrl : ""}
+                    url={selectedPost.bannerUrl}
                     alt={`${selectedPost.title} banner`}
                     onClick={
-                      selectedPost.hasBanner
+                      selectedPost.bannerUrl
                         ? () => openViewer(selectedPost.bannerUrl)
                         : undefined
                     }
@@ -639,6 +654,7 @@ export default function Broadcasts() {
               src={viewerUrl}
               alt="Preview"
               className="max-h-[75vh] w-full object-contain rounded"
+              crossOrigin="anonymous"
             />
           )}
           {viewerTypeRef.current === "pdf" && viewerUrl && (

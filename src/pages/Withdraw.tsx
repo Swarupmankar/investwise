@@ -34,44 +34,32 @@ import { useToast } from "@/hooks/use-toast";
 import {
   useSendWithdrawOTPMutation,
   useCreateWithdrawTransactionMutation,
+  useUploadWithdrawProofMutation,
 } from "@/API/withdraw.api";
 import { useGetInvestmentPortfolioQuery } from "@/API/investmentApi";
 import { useGetTransactionsQuery } from "@/API/transactions.api";
 import WithdrawalVerification from "@/components/WithdrawalVerification";
 
-/**
- * Helper: generate options for select (keeps your original increments)
- * Updated to make minimum withdrawal $500 and show increments >= 500
- */
 const generateWithdrawalOptions = (balance: number) => {
   const options: { value: string; label: string }[] = [];
-  // only show increments that are >= the minimum withdrawal (500)
   const increments = [500, 1000, 2500, 5000];
-
-  for (const inc of increments) {
+  for (const inc of increments)
     if (inc <= balance)
       options.push({
         value: inc.toString(),
         label: `$${inc.toLocaleString()}`,
       });
-  }
-
-  // show full balance as "Max Available" only if it's above the minimum
   if (balance > 500)
     options.push({
       value: balance.toString(),
       label: `$${balance.toLocaleString()} (Max Available)`,
     });
-
   options.push({ value: "custom", label: "Custom Amount" });
   return options;
 };
 
 type FormType = "investment" | "referral" | "principal";
 
-/**
- * Small formatters
- */
 const formatDate = (iso: string | null) => {
   if (!iso) return "—";
   try {
@@ -81,7 +69,7 @@ const formatDate = (iso: string | null) => {
       year: "numeric",
     }).format(new Date(iso));
   } catch {
-    return iso;
+    return iso as string;
   }
 };
 
@@ -89,58 +77,44 @@ const formatStatusForLabel = (statusRaw: string) => {
   const s = (statusRaw || "").toUpperCase();
   switch (s) {
     case "PENDING":
-      return "Pending (In Progress)";
-    case "ADMIN_PROOF_UPLOADED":
-      return "Admin Proof Uploaded";
-    case "REVIEW":
-      return "Admin Review";
+      return "Pending";
+    case "PROCESSING":
+      return "Processing";
+    case "COMPLETED":
     case "APPROVED":
       return "Completed";
+    case "FAILED":
     case "REJECTED":
+    case "CANCELLED":
       return "Rejected";
     default:
       return statusRaw;
   }
 };
 
-/**
- * Badge color helper (keeps original look)
- */
 const getStatusBadge = (statusRaw: string) => {
   const s = (statusRaw || "").toUpperCase();
-  if (s === "APPROVED") return "bg-success/10 text-success border-success/20";
-  if (s === "ADMIN_PROOF_UPLOADED" || s === "REVIEW")
-    return "bg-warning/10 text-warning border-warning/20";
-  if (s === "PENDING")
-    return "bg-muted/10 text-muted-foreground border-muted/20";
-  if (s === "REJECTED")
+  if (s === "COMPLETED" || s === "APPROVED")
+    return "bg-success/10 text-success border-success/20";
+  if (s === "FAILED" || s === "REJECTED" || s === "CANCELLED")
     return "bg-destructive/10 text-destructive border-destructive/20";
+  if (s === "PENDING" || s === "PROCESSING")
+    return "bg-warning/10 text-warning border-warning/20";
   return "bg-muted text-muted-foreground border-border";
 };
 
 const getStatusIcon = (statusRaw: string) => {
   const s = (statusRaw || "").toUpperCase();
-  if (s === "APPROVED") return <CheckCircle className="h-4 w-4" />;
-  if (s === "REJECTED") return <XCircle className="h-4 w-4" />;
+  if (s === "COMPLETED" || s === "APPROVED")
+    return <CheckCircle className="h-4 w-4" />;
+  if (s === "FAILED" || s === "REJECTED" || s === "CANCELLED")
+    return <XCircle className="h-4 w-4" />;
   return <Clock className="h-4 w-4" />;
 };
 
-/**
- * Lightweight TRC20 (Tron) address validator (client-side)
- * TRC20 addresses typically start with 'T' and are 34 chars (base58).
- * This checks the basic structure (client-side sanity check).
- */
-const isValidTrc20Address = (addr: string) => {
-  if (!addr || typeof addr !== "string") return false;
-  // Basic pattern: starts with T, total length 34, alphanumeric (base58 includes other chars but this is permissive enough).
-  const re = /^T[a-zA-Z0-9]{33}$/;
-  return re.test(addr.trim());
-};
+const isValidTrc20Address = (addr: string) =>
+  /^T[a-zA-Z0-9]{33}$/.test((addr || "").trim());
 
-/**
- * WithdrawalForm component (keeps your original form/flow)
- * Added real-time TRC20 validation and minimum withdrawal checks (500).
- */
 const WithdrawalForm = ({
   title,
   balance,
@@ -208,7 +182,6 @@ const WithdrawalForm = ({
   const step = currentStep[formType];
 
   const handleSendOTP = async () => {
-    // enforce minimum and address validity before sending OTP
     if (!amount || parseFloat(amount) <= 0) return;
     if (parseFloat(amount) > balance) return;
     if (parseFloat(amount) < 500) return;
@@ -218,7 +191,7 @@ const WithdrawalForm = ({
 
   const handleContinueTo2FA = () => {
     setCurrentStep((prev) => ({ ...prev, [formType]: 2 }));
-    handleSendOTP(); // auto-send OTP upon continuing
+    handleSendOTP();
   };
 
   return (
@@ -290,7 +263,6 @@ const WithdrawalForm = ({
                       address ? !isValidTrc20Address(address) : undefined
                     }
                   />
-                  {/* validation icon: green check if valid, red X if invalid and non-empty */}
                   <div aria-hidden>
                     {address ? (
                       isValidTrc20Address(address) ? (
@@ -450,30 +422,13 @@ const WithdrawalForm = ({
                       containerClassName="gap-4"
                     >
                       <InputOTPGroup className="gap-4">
-                        <InputOTPSlot
-                          index={0}
-                          className="h-14 w-14 text-lg font-semibold border-2 rounded-lg"
-                        />
-                        <InputOTPSlot
-                          index={1}
-                          className="h-14 w-14 text-lg font-semibold border-2 rounded-lg"
-                        />
-                        <InputOTPSlot
-                          index={2}
-                          className="h-14 w-14 text-lg font-semibold border-2 rounded-lg"
-                        />
-                        <InputOTPSlot
-                          index={3}
-                          className="h-14 w-14 text-lg font-semibold border-2 rounded-lg"
-                        />
-                        <InputOTPSlot
-                          index={4}
-                          className="h-14 w-14 text-lg font-semibold border-2 rounded-lg"
-                        />
-                        <InputOTPSlot
-                          index={5}
-                          className="h-14 w-14 text-lg font-semibold border-2 rounded-lg"
-                        />
+                        {Array.from({ length: 6 }).map((_, i) => (
+                          <InputOTPSlot
+                            key={i}
+                            index={i}
+                            className="h-14 w-14 text-lg font-semibold border-2 rounded-lg"
+                          />
+                        ))}
                       </InputOTPGroup>
                     </InputOTP>
                   </div>
@@ -525,31 +480,23 @@ const WithdrawalForm = ({
   );
 };
 
-/**
- * Main Withdraw page — updated to match your requested flow and backend types
- */
 export default function Withdraw() {
   const { toast } = useToast();
-
-  // RTK Query hooks with refetch available
   const [sendWithdrawOTP, { isLoading: isSendingOTP }] =
     useSendWithdrawOTPMutation();
   const [createWithdrawTransaction, { isLoading: isCreatingWithdrawal }] =
     useCreateWithdrawTransactionMutation();
+  const [uploadWithdrawProof] = useUploadWithdrawProofMutation();
+
   const {
     data: portfolioData,
     isLoading: portfolioLoading,
     error: portfolioError,
     refetch: refetchPortfolio,
   } = useGetInvestmentPortfolioQuery();
-  const {
-    data: transactionsData,
-    isLoading: transactionsLoading,
-    error: transactionsError,
-    refetch: refetchTransactions,
-  } = useGetTransactionsQuery();
+  const { data: transactionsData, refetch: refetchTransactions } =
+    useGetTransactionsQuery();
 
-  // UI state
   const [investmentWithdrawAddress, setInvestmentWithdrawAddress] =
     useState("");
   const [referralWithdrawAddress, setReferralWithdrawAddress] = useState("");
@@ -573,16 +520,12 @@ export default function Withdraw() {
     principal: false,
   });
 
-  // balances derived from portfolio API (keep original variable names)
   const balances = {
     investment: portfolioData?.investmentReturns ?? 0,
     referral: portfolioData?.referralEarnings ?? 0,
     principal: portfolioData?.walletBalance ?? 0,
   };
 
-  /**
-   * Backend endpoint interactions
-   */
   const handleSendOTP = async () => {
     try {
       await sendWithdrawOTP().unwrap();
@@ -661,7 +604,6 @@ export default function Withdraw() {
         description: `Your withdrawal of $${requestedAmount} has been initiated`,
       });
 
-      // reset UI
       setTwoFactorCode((p) => ({ ...p, [formType]: "" }));
       setCurrentStep((p) => ({ ...p, [formType]: 1 }));
       if (formType === "investment") {
@@ -678,7 +620,6 @@ export default function Withdraw() {
       }
       setCustomAmount((p) => ({ ...p, [formType]: false }));
 
-      // REFRESH transactions & portfolio
       await Promise.allSettled([refetchTransactions(), refetchPortfolio()]);
     } catch (err: any) {
       toast({
@@ -690,138 +631,35 @@ export default function Withdraw() {
     }
   };
 
-  /**
-   * Upload client screenshot — backend should update status to REVIEW
-   * and we refetch transactions afterwards so UI updates instantly.
-   */
-  const uploadWithdrawalScreenshot = async (
-    withdrawalId: string,
-    file: File
-  ) => {
-    try {
-      const fd = new FormData();
-      fd.append("screenshot", file);
-
-      const token =
-        typeof window !== "undefined" ? localStorage.getItem("token") : null;
-      const res = await fetch(`/v1/withdrawals/${withdrawalId}/screenshot`, {
-        method: "POST",
-        body: fd,
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      });
-
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body?.message || "Upload failed");
-      }
-
-      toast({
-        title: "Screenshot Uploaded",
-        description: "Client proof uploaded; admin will review shortly.",
-      });
-
-      await refetchTransactions();
-      return { success: true };
-    } catch (err: any) {
-      toast({
-        title: "Upload Failed",
-        description: err?.message || "Could not upload screenshot",
-        variant: "destructive",
-      });
-      return { success: false };
-    }
-  };
-
-  const completeWithdrawalVerification = async (
-    withdrawalId: string,
-    action: "admin_approved" | "client_uploaded" | "reject" | "approve_final"
-  ) => {
-    try {
-      const token =
-        typeof window !== "undefined" ? localStorage.getItem("token") : null;
-      const res = await fetch(`/v1/withdrawals/${withdrawalId}/verify`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ action }),
-      });
-
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body?.message || "Verification action failed");
-      }
-
-      toast({
-        title: "Verification Updated",
-        description: "Status updated successfully",
-      });
-
-      // REFRESH
-      await Promise.allSettled([refetchTransactions(), refetchPortfolio()]);
-      return { success: true };
-    } catch (err: any) {
-      toast({
-        title: "Action Failed",
-        description: err?.message || "Could not update verification",
-        variant: "destructive",
-      });
-      return { success: false };
-    }
-  };
-
-  // small convenience wrappers for dev / simulate usage (call the real endpoints above)
-  const simulateAdminUploadProof = async (
-    withdrawalId: string,
-    file?: File
-  ) => {
-    return completeWithdrawalVerification(withdrawalId, "admin_approved");
-  };
-
-  /**
-   * Build withdrawalTransaction list from transactionsData returned by API.
-   */
+  // Build withdrawalTransaction list from API
   const withdrawalTransactions = useMemo(() => {
-    if (!transactionsData) return [];
-
+    if (!transactionsData) return [] as any[];
     const rawArr =
       (transactionsData as any)?.withdrawals ??
-      (transactionsData as any)?.withdrawls ??
       (transactionsData as any)?.data ??
       (transactionsData as any)?.transactions ??
       [];
 
     return (rawArr as any[]).map((w: any) => {
-      const statusRaw = (
-        w.status ??
-        w.transactionStatus ??
-        w.withdrawStatus ??
-        ""
-      ).toString();
       const adminProofUrl =
         w.adminProofUrl ??
         w.admin_proof_url ??
-        w.admin_uploaded_proof ??
         w.proofUrl ??
         w.admin_proof ??
         null;
       const screenshotUrl =
-        w.screenshotUrl ??
-        w.clientProofUrl ??
-        w.client_proof ??
-        w.client_screenshot ??
-        null;
+        w.screenshotUrl ?? w.clientProofUrl ?? w.client_proof ?? null;
       const updatedAt = w.updatedAt ?? w.processedAt ?? w.approvedAt ?? null;
       const createdAt = w.createdAt ?? w.requestedAt ?? null;
 
       return {
         id: String(
           w.id ??
-            w._id ??
             w.transactionId ??
+            w._id ??
             Math.random().toString(36).slice(2, 9)
         ),
+        txIdRaw: w.transactionId ?? w.id ?? w._id, // keep raw id for proof upload
         amount: Number(String(w.amount ?? "0").replace(/,/g, "")) || 0,
         source: (() => {
           const withdrawFrom = (w.withdrawFrom ?? w.source ?? "")
@@ -832,8 +670,9 @@ export default function Withdraw() {
           if (withdrawFrom.includes("referral")) return "Referral";
           return withdrawFrom || "—";
         })(),
-        rawStatus: statusRaw,
-        status: (statusRaw || "").toUpperCase(),
+        status: (w.status ?? w.transactionStatus ?? "")
+          .toString()
+          .toUpperCase(),
         walletAddress: w.userWallet ?? w.wallet ?? "—",
         requestDate: createdAt ? formatDate(createdAt) : "—",
         processedDate: updatedAt ? formatDate(updatedAt) : null,
@@ -841,20 +680,18 @@ export default function Withdraw() {
         adminProofUrl,
         screenshotUrl,
         rawData: w,
-      };
+      } as const;
     });
   }, [transactionsData]);
 
-  const ACTIVE_STATUSES = ["PENDING", "ADMIN_PROOF_UPLOADED", "REVIEW"];
-  const isRecentlyApproved = (t: any) => {
-    if (!t || t.status !== "APPROVED") return false;
-    const when =
-      t.updatedAtRaw ?? t.rawData?.updatedAt ?? t.rawData?.approvedAt ?? null;
+  const ACTIVE_STATUSES = ["PENDING", "PROCESSING"] as const;
+  const isRecentlyCompleted = (t: any) => {
+    if (!t || (t.status !== "COMPLETED" && t.status !== "APPROVED"))
+      return false;
+    const when = t.updatedAtRaw ?? t.rawData?.updatedAt ?? null;
     if (!when) return true;
     try {
-      const then = new Date(when).getTime();
-      const now = Date.now();
-      return now - then < 24 * 60 * 60 * 1000;
+      return Date.now() - new Date(when).getTime() < 24 * 60 * 60 * 1000;
     } catch {
       return true;
     }
@@ -880,16 +717,22 @@ export default function Withdraw() {
     const [currentPage, setCurrentPage] = useState(1);
     const [itemsPerPage, setItemsPerPage] = useState(5);
 
-    const pendingVerifications = withdrawals.filter((w) => {
-      if (!w || !w.status) return false;
-      if (w.status === "APPROVED") return isRecentlyApproved(w);
-      return ACTIVE_STATUSES.includes(w.status);
-    });
+    const pendingVerifications = withdrawals.filter(
+      (w) =>
+        ACTIVE_STATUSES.includes(w.status) ||
+        (!!w.adminProofUrl && !w.screenshotUrl)
+    );
 
     const historicalWithdrawals = withdrawals.filter((w) => {
       if (!w || !w.status) return false;
-      if (w.status === "REJECTED") return true;
-      if (w.status === "APPROVED") return !isRecentlyApproved(w);
+      if (
+        w.status === "FAILED" ||
+        w.status === "REJECTED" ||
+        w.status === "CANCELLED"
+      )
+        return true;
+      if (w.status === "COMPLETED" || w.status === "APPROVED")
+        return !isRecentlyCompleted(w);
       return false;
     });
 
@@ -901,7 +744,7 @@ export default function Withdraw() {
     );
 
     const pendingUploadsCount = pendingVerifications.filter(
-      (w) => w.status === "ADMIN_PROOF_UPLOADED" && !w.screenshotUrl
+      (w) => !!w.adminProofUrl && !w.screenshotUrl
     ).length;
 
     return (
@@ -909,74 +752,18 @@ export default function Withdraw() {
         {pendingVerifications.length > 0 &&
           pendingVerifications.map((withdrawal) => (
             <div key={withdrawal.id} className="mb-4">
-              {withdrawal.status === "ADMIN_PROOF_UPLOADED" &&
-                withdrawal.adminProofUrl && (
-                  <Card className="mb-3">
-                    <CardContent className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="text-sm text-muted-foreground">
-                            Admin Proof
-                          </div>
-                          <div className="text-foreground font-semibold">
-                            {formatStatusForLabel(withdrawal.status)}
-                          </div>
-                        </div>
-                        <Badge
-                          className={cn(
-                            "border",
-                            getStatusBadge(withdrawal.status)
-                          )}
-                        >
-                          {formatStatusForLabel(withdrawal.status)}
-                        </Badge>
-                      </div>
-
-                      <div className="mt-3">
-                        <img
-                          src={withdrawal.adminProofUrl}
-                          alt="Admin proof"
-                          className="w-full max-h-60 object-contain rounded-md border border-border"
-                        />
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
-
               <WithdrawalVerification
-                key={withdrawal.id}
                 withdrawal={withdrawal}
-                onUploadScreenshot={async (file: File) => {
-                  const res = await uploadWithdrawalScreenshot(
-                    withdrawal.id,
-                    file
-                  );
-                  if (res.success) await refetchTransactions();
-                  return res;
-                }}
-                onVerificationComplete={async (
-                  action:
-                    | "client_uploaded"
-                    | "admin_approved"
-                    | "approve_final"
-                    | "reject"
-                ) => {
-                  const res = await completeWithdrawalVerification(
-                    withdrawal.id,
-                    action === "admin_approved"
-                      ? "admin_approved"
-                      : action === "client_uploaded"
-                      ? "client_uploaded"
-                      : action === "approve_final"
-                      ? "approve_final"
-                      : "reject"
-                  );
-                  if (res.success) await refetchTransactions();
-                  return res;
-                }}
                 pendingUploadsCount={pendingUploadsCount}
-                simulateAdminApproval={simulateAdminUploadProof}
-                simulateClientScreenshotUpload={uploadWithdrawalScreenshot}
+                onUploadScreenshot={async (file: File) => {
+                  const txId = Number(withdrawal.txIdRaw ?? withdrawal.id);
+                  await uploadWithdrawProof({
+                    transactionId: txId,
+                    screenshot: file,
+                  }).unwrap();
+                  await refetchTransactions();
+                  return { success: true };
+                }}
               />
             </div>
           ))}
@@ -1025,7 +812,7 @@ export default function Withdraw() {
 
           <CardContent>
             <div className="space-y-4">
-              {historicalWithdrawals.length === 0 ? (
+              {paginatedWithdrawals.length === 0 ? (
                 <div className="text-center py-8">
                   <AlertCircle className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                   <p className="text-muted-foreground">
@@ -1130,7 +917,6 @@ export default function Withdraw() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
         <div className="space-y-1">
           <h1 className="text-3xl font-bold text-foreground tracking-tight">
@@ -1142,7 +928,6 @@ export default function Withdraw() {
         </div>
       </div>
 
-      {/* Portfolio error */}
       {portfolioError && (
         <Card className="border-destructive/20 bg-destructive/5">
           <CardContent className="p-4">
@@ -1161,7 +946,6 @@ export default function Withdraw() {
         </Card>
       )}
 
-      {/* Tabs - unchanged UI */}
       <Tabs defaultValue="investment" className="space-y-6">
         <TabsList className="grid w-full grid-cols-3 bg-muted/50 p-1 rounded-xl">
           <TabsTrigger

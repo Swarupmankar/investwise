@@ -12,10 +12,9 @@ import {
   Clock,
   AlertTriangle,
   Shield,
-  FileImage,
+  ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import ProofImageModal from "./ProofImageModal";
 
 interface WithdrawalVerificationProps {
   withdrawal: {
@@ -28,34 +27,38 @@ interface WithdrawalVerificationProps {
     verificationDeadline?: string;
     isBlocked?: boolean;
   };
-  onUploadScreenshot: (file: File) => Promise<{ success: boolean }>; // Updated signature
-  onVerificationComplete: (
+  onUploadScreenshot: (file: File) => Promise<{ success: boolean }>;
+  // made optional + guarded (prevents "not a function")
+  onVerificationComplete?: (
     action: "client_uploaded" | "admin_approved" | "approve_final" | "reject"
-  ) => Promise<{ success: boolean }>; // Updated signature
+  ) => Promise<{ success: boolean }>;
   pendingUploadsCount: number;
-  simulateAdminApproval?: (
-    withdrawalId: string,
-    file?: File
-  ) => Promise<{ success: boolean }>; // Updated signature
-  simulateClientScreenshotUpload?: (
-    withdrawalId: string,
-    file: File
-  ) => Promise<{ success: boolean }>; // Updated signature
 }
+
+const API_ORIGIN =
+  (import.meta as any).env?.VITE_API_BASE_URL || "http://localhost:3000";
+
+const normalizeImageUrl = (url?: string) => {
+  if (!url) return "";
+  if (/^https?:\/\//i.test(url)) return url; // already absolute
+  // prefix relative paths from API origin (handles "/upload/..." and "upload/...")
+  return `${API_ORIGIN}${url.startsWith("/") ? "" : "/"}${url}`;
+};
 
 const WithdrawalVerification = ({
   withdrawal,
   onUploadScreenshot,
   onVerificationComplete,
   pendingUploadsCount,
-  simulateAdminApproval,
-  simulateClientScreenshotUpload,
 }: WithdrawalVerificationProps) => {
+  const status = (withdrawal.status || "").toUpperCase();
+
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadedImage, setUploadedImage] = useState<string>(
     withdrawal.screenshotUrl || ""
   );
   const [isUploading, setIsUploading] = useState(false);
+  const [adminImgError, setAdminImgError] = useState(false); // fallback for admin proof
 
   const maxPendingUploads = 3;
   const isBlocked = pendingUploadsCount >= maxPendingUploads;
@@ -64,60 +67,93 @@ const WithdrawalVerification = ({
     const file = event.target.files?.[0];
     if (file) {
       setSelectedFile(file);
-      // Create preview URL
       const reader = new FileReader();
-      reader.onload = (e) => {
-        setUploadedImage(e.target?.result as string);
-      };
+      reader.onload = (e) => setUploadedImage(e.target?.result as string);
       reader.readAsDataURL(file);
     }
   };
 
   const handleUpload = async () => {
     if (!selectedFile) return;
-
     setIsUploading(true);
     try {
       await onUploadScreenshot(selectedFile);
-    } catch (error) {
-      console.error("Upload failed:", error);
+      // keep preview visible; you can clear selectedFile if you want
+      // setSelectedFile(null);
     } finally {
       setIsUploading(false);
     }
   };
 
   const handleVerificationComplete = async () => {
-    try {
+    // guard to prevent runtime error if parent didn't pass this
+    if (onVerificationComplete) {
       await onVerificationComplete("client_uploaded");
-    } catch (error) {
-      console.error("Verification completion failed:", error);
     }
   };
 
   const getStatusIcon = () => {
     if (isBlocked) return <XCircle className="w-5 h-5 text-destructive" />;
-    if (withdrawal.status === "completed")
+    if (status === "APPROVED")
       return <CheckCircle className="w-5 h-5 text-success" />;
-    if (withdrawal.status === "admin_review")
-      return <Clock className="w-5 h-5 text-warning" />;
-    if (withdrawal.status === "client_verification_pending")
-      return <Upload className="w-5 h-5 text-primary" />;
-    if (withdrawal.status === "admin_approved")
-      return <Shield className="w-5 h-5 text-blue-600" />;
-    if (withdrawal.status === "pending")
+    if (status === "REVIEW") return <Clock className="w-5 h-5 text-warning" />;
+    if (status === "ADMIN_PROOF_UPLOADED")
+      return <Shield className="w-5 h-5" />;
+    if (status === "PENDING")
       return <Clock className="w-5 h-5 text-muted-foreground" />;
-    return <Upload className="w-5 h-5 text-primary" />;
+    if (status === "REJECTED")
+      return <XCircle className="w-5 h-5 text-destructive" />;
+    return <Upload className="w-5 h-5" />;
   };
 
-  const getStatusColor = () => {
-    if (isBlocked) return "text-destructive";
-    if (withdrawal.status === "completed") return "text-success";
-    if (withdrawal.status === "admin_review") return "text-warning";
-    if (withdrawal.status === "client_verification_pending")
-      return "text-primary";
-    if (withdrawal.status === "admin_approved") return "text-blue-600";
-    if (withdrawal.status === "pending") return "text-muted-foreground";
-    return "text-primary";
+  const getStatusBadge = () => {
+    switch (status) {
+      case "APPROVED":
+        return "bg-success/10 text-success border-success/20";
+      case "REVIEW":
+      case "ADMIN_PROOF_UPLOADED":
+        return "bg-warning/10 text-warning border-warning/20";
+      case "PENDING":
+        return "bg-muted/10 text-muted-foreground border-muted/20";
+      case "REJECTED":
+        return "bg-destructive/10 text-destructive border-destructive/20";
+      default:
+        return "bg-muted text-muted-foreground border-border";
+    }
+  };
+
+  const statusLabel = () => {
+    switch (status) {
+      case "APPROVED":
+        return "Completed";
+      case "REVIEW":
+        return "Under Admin Review";
+      case "ADMIN_PROOF_UPLOADED":
+        return "Admin Proof Uploaded";
+      case "PENDING":
+        return "Awaiting Admin Approval";
+      case "REJECTED":
+        return "Rejected";
+      default:
+        return "Pending";
+    }
+  };
+
+  const progressValue = () => {
+    switch (status) {
+      case "APPROVED":
+        return 100;
+      case "REVIEW":
+        return 80;
+      case "ADMIN_PROOF_UPLOADED":
+        return uploadedImage ? 60 : 40;
+      case "PENDING":
+        return 0;
+      case "REJECTED":
+        return 0;
+      default:
+        return 0;
+    }
   };
 
   const getPendingUploadsColor = () => {
@@ -170,11 +206,11 @@ const WithdrawalVerification = ({
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           {getStatusIcon()}
-          <span className={getStatusColor()}>Withdrawal Verification</span>
+          <span>{"Withdrawal Verification"}</span>
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
-        {/* Withdrawal Details */}
+        {/* Details */}
         <div className="p-4 bg-muted/20 rounded-lg">
           <div className="flex justify-between items-center mb-2">
             <span className="text-sm text-muted-foreground">
@@ -190,60 +226,16 @@ const WithdrawalVerification = ({
           </div>
         </div>
 
-        {/* Verification Progress */}
+        {/* Status */}
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <span className="font-medium">Verification Progress</span>
-            <Badge
-              className={cn(
-                "border",
-                withdrawal.status === "completed"
-                  ? "bg-success/10 text-success border-success/20"
-                  : withdrawal.status === "admin_review"
-                  ? "bg-warning/10 text-warning border-warning/20"
-                  : withdrawal.status === "client_verification_pending"
-                  ? "bg-blue-500/10 text-blue-600 border-blue-500/20"
-                  : withdrawal.status === "admin_approved"
-                  ? "bg-purple-500/10 text-purple-600 border-purple-500/20"
-                  : withdrawal.status === "pending"
-                  ? "bg-muted/10 text-muted-foreground border-muted/20"
-                  : "bg-muted text-muted-foreground border-border"
-              )}
-            >
-              {withdrawal.status === "completed"
-                ? "Completed"
-                : withdrawal.status === "admin_review"
-                ? "Under Admin Review"
-                : withdrawal.status === "client_verification_pending"
-                ? "Upload Your Proof"
-                : withdrawal.status === "admin_approved"
-                ? "Admin Approved - Payment Processing"
-                : withdrawal.status === "pending"
-                ? "Awaiting Admin Approval"
-                : "Pending"}
+            <Badge className={cn("border", getStatusBadge())}>
+              {statusLabel()}
             </Badge>
           </div>
-
           <div className="space-y-2">
-            <Progress
-              value={
-                withdrawal.status === "completed"
-                  ? 100
-                  : withdrawal.status === "admin_review"
-                  ? 80
-                  : withdrawal.status === "client_verification_pending" &&
-                    uploadedImage
-                  ? 60
-                  : withdrawal.status === "client_verification_pending"
-                  ? 40
-                  : withdrawal.status === "admin_approved"
-                  ? 20
-                  : withdrawal.status === "pending"
-                  ? 0
-                  : 0
-              }
-              className="h-2"
-            />
+            <Progress value={progressValue()} className="h-2" />
             <div className="flex justify-between text-xs text-muted-foreground">
               <span>Request</span>
               <span>Admin Approval</span>
@@ -254,7 +246,51 @@ const WithdrawalVerification = ({
           </div>
         </div>
 
-        {/* Pending Uploads Counter */}
+        {/* Admin proof — inline in the card with a safe fallback (no modal/new tab) */}
+        {status === "ADMIN_PROOF_UPLOADED" && withdrawal.adminProofUrl && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <CheckCircle className="w-5 h-5 text-success" />
+                <span className="font-medium text-success">
+                  Payment Proof Available
+                </span>
+              </div>
+            </div>
+
+            {!adminImgError ? (
+              <div className="border rounded-md p-2 bg-muted/10">
+                <img
+                  src={normalizeImageUrl(withdrawal.adminProofUrl)}
+                  alt="Admin proof"
+                  className="w-full max-h-60 object-contain rounded"
+                  onError={() => setAdminImgError(true)}
+                  crossOrigin="anonymous"
+                />
+              </div>
+            ) : (
+              <a
+                href={normalizeImageUrl(withdrawal.adminProofUrl)}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-2 text-sm underline"
+              >
+                <ExternalLink className="w-4 h-4" />
+                Open admin proof
+              </a>
+            )}
+
+            <div className="p-3 bg-primary/10 border border-primary/20 rounded-lg">
+              <p className="text-sm text-primary font-medium">Next Step:</p>
+              <p className="text-sm text-muted-foreground">
+                Please check your wallet and upload a screenshot of the received
+                payment for verification.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Pending uploads counter */}
         <div className="flex items-center justify-between p-3 bg-muted/20 rounded-lg">
           <div className="flex items-center gap-2">
             <AlertTriangle
@@ -270,8 +306,8 @@ const WithdrawalVerification = ({
           </span>
         </div>
 
-        {/* Pending Admin Approval */}
-        {withdrawal.status === "pending" && (
+        {/* Awaiting admin approval */}
+        {status === "PENDING" && (
           <div className="p-4 bg-muted/10 border border-muted/20 rounded-lg text-center">
             <Clock className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
             <h4 className="font-medium text-muted-foreground mb-2">
@@ -281,87 +317,11 @@ const WithdrawalVerification = ({
               Your withdrawal request is being reviewed by our admin team.
               You'll receive notification once approved.
             </p>
-            {simulateAdminApproval && (
-              <div className="mt-4">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => simulateAdminApproval(withdrawal.id)}
-                  className="text-xs bg-blue-50 hover:bg-blue-100 border-blue-200"
-                >
-                  [Demo] Simulate Admin Approval
-                </Button>
-              </div>
-            )}
           </div>
         )}
 
-        {/* Admin Approved - Payment Processing */}
-        {withdrawal.status === "admin_approved" && (
-          <div className="p-4 bg-purple-500/10 border border-purple-500/20 rounded-lg">
-            <div className="text-center mb-4">
-              <Shield className="w-12 h-12 text-purple-600 mx-auto mb-4" />
-              <h4 className="font-medium text-purple-600 mb-2">
-                Admin Approved - Processing Payment
-              </h4>
-              <p className="text-sm text-muted-foreground">
-                Your withdrawal has been approved and payment is being processed
-                to your wallet.
-              </p>
-            </div>
-
-            {withdrawal.adminProofUrl && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle className="w-5 h-5 text-success" />
-                    <span className="font-medium text-success">
-                      Payment Proof Available
-                    </span>
-                  </div>
-                  <ProofImageModal
-                    imageUrl={withdrawal.adminProofUrl}
-                    title="Admin Payment Proof"
-                    description="Proof that the admin has processed your withdrawal payment"
-                    type="admin"
-                  />
-                </div>
-                <div className="p-3 bg-primary/10 border border-primary/20 rounded-lg">
-                  <p className="text-sm text-primary font-medium">Next Step:</p>
-                  <p className="text-sm text-muted-foreground">
-                    Please check your wallet and upload a screenshot of the
-                    received payment for verification.
-                  </p>
-                </div>
-                {simulateClientScreenshotUpload &&
-                  !withdrawal.screenshotUrl && (
-                    <div className="mt-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={async () => {
-                          const dummyFile = new File([""], "simulation.png", {
-                            type: "image/png",
-                          });
-                          await simulateClientScreenshotUpload(
-                            withdrawal.id,
-                            dummyFile
-                          );
-                        }}
-                        className="text-xs bg-green-50 hover:bg-green-100 border-green-200"
-                      >
-                        [Demo] Simulate Client Proof Upload
-                      </Button>
-                    </div>
-                  )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Upload Section */}
-        {(withdrawal.status === "admin_approved" ||
-          withdrawal.status === "client_verification_pending") && (
+        {/* Upload section */}
+        {(status === "ADMIN_PROOF_UPLOADED" || status === "REVIEW") && (
           <div className="space-y-4">
             <div className="p-4 bg-primary/5 border border-primary/20 rounded-lg">
               <h4 className="font-medium text-primary mb-2">
@@ -383,19 +343,32 @@ const WithdrawalVerification = ({
                     className="max-h-48 mx-auto rounded-lg"
                   />
                 </div>
-
+                {/* Only show this button if parent provided the handler */}
+                {onVerificationComplete && (
+                  <Button
+                    onClick={handleVerificationComplete}
+                    className="w-full gradient-primary text-white"
+                  >
+                    Confirm & Submit for Review
+                  </Button>
+                )}
+                {/* Always allow uploading to server */}
                 <Button
-                  onClick={handleVerificationComplete}
+                  onClick={handleUpload}
+                  disabled={isUploading}
                   className="w-full gradient-primary text-white"
                 >
-                  Confirm & Submit for Review
+                  {isUploading ? "Uploading..." : "Upload Proof"}
                 </Button>
               </div>
             ) : (
               <div className="space-y-4">
                 <div className="border-2 border-dashed border-border rounded-lg p-8 text-center">
                   <Upload className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                  <Label htmlFor="screenshot-upload" className="cursor-pointer">
+                  <Label
+                    htmlFor={`screenshot-upload-${withdrawal.id}`}
+                    className="cursor-pointer"
+                  >
                     <span className="text-primary font-medium">
                       Click to upload screenshot
                     </span>
@@ -405,7 +378,7 @@ const WithdrawalVerification = ({
                     </span>
                   </Label>
                   <Input
-                    id="screenshot-upload"
+                    id={`screenshot-upload-${withdrawal.id}`}
                     type="file"
                     accept="image/*"
                     onChange={handleFileSelect}
@@ -430,7 +403,38 @@ const WithdrawalVerification = ({
           </div>
         )}
 
-        {/* Warning for pending uploads */}
+        {/* Review state */}
+        {status === "REVIEW" && (
+          <div className="p-4 bg-warning/10 border border-warning/20 rounded-lg">
+            <div className="flex items-start gap-3">
+              <Clock className="w-5 h-5 text-warning mt-0.5" />
+              <div>
+                <p className="font-medium text-warning">Under Admin Review</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  We'll notify you once the verification is complete.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Approved or Rejected summaries */}
+        {status === "APPROVED" && (
+          <div className="p-4 bg-success/10 border border-success/20 rounded-lg flex items-center gap-2">
+            <CheckCircle className="w-5 h-5 text-success" />
+            <span className="text-sm">Withdrawal completed successfully.</span>
+          </div>
+        )}
+        {status === "REJECTED" && (
+          <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg flex items-center gap-2">
+            <XCircle className="w-5 h-5 text-destructive" />
+            <span className="text-sm">
+              Withdrawal was rejected. Please contact support.
+            </span>
+          </div>
+        )}
+
+        {/* Warning for many pending uploads */}
         {pendingUploadsCount >= 2 && pendingUploadsCount < 3 && (
           <div className="p-4 bg-warning/10 border border-warning/20 rounded-lg">
             <div className="flex items-start gap-3">

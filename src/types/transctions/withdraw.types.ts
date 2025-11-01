@@ -12,7 +12,7 @@ export interface WithdrawOTPResponse {
 
 export interface WithdrawTransactionResponse {
   id: number;
-  transactionId: string;
+  transactionId: number;
   amount: string;
   status: string;
   withdrawFrom: string;
@@ -21,7 +21,7 @@ export interface WithdrawTransactionResponse {
 }
 
 export interface UploadWithdrawProofRequest {
-  transactionId: string;
+  transactionId: number;
   screenshot: File;
 }
 

@@ -42,8 +42,9 @@ export const withdrawApi = baseApi.injectEndpoints({
     >({
       query: (data) => {
         const formData = new FormData();
-        formData.append("transactionId", data.transactionId);
-        formData.append("screenshot", data.screenshot);
+        const txIdNum = Number(data.transactionId);
+        formData.append("transactionId", String(txIdNum));
+        formData.append("file", data.screenshot);
 
         return {
           url: ENDPOINTS.WITHDRAW.UPLOAD_PROOF,
