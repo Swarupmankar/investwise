@@ -27,6 +27,13 @@ import {
 import EmptyCard from "@/components/ui/EmptyCard";
 
 /** Helpers **/
+
+const normalizeStatus = (raw?: string) => {
+  const s = String(raw || "").toLowerCase();
+  if (s === "archived" || s === "archive") return "closed";
+  return s;
+};
+
 const normalizeId = (id: unknown): number | undefined => {
   if (id === undefined || id === null) return undefined;
   if (typeof id === "number" && Number.isFinite(id)) return id;
@@ -302,7 +309,6 @@ export default function InvestmentManagement(): JSX.Element {
   // --- Monthly cycle logic based on investment.startDate (fix) ---
   const cycle = computeMonthlyCycle(investment.startDate);
 
-  const daysInThisMonth = cycle.daysInThisMonth;
   const daysCompleted = cycle.daysCompleted;
   const daysRemaining = cycle.daysRemaining;
   const progressPct = cycle.progressPct;
@@ -310,16 +316,21 @@ export default function InvestmentManagement(): JSX.Element {
   const maturityDate = cycle.maturityDate;
   const isFirstOfMonthToday = cycle.isFirstOfMonthToday;
 
-  const getStatusBadge = (status: string) => {
+  const getStatusBadge = (status?: string) => {
+    const s = normalizeStatus(status);
     const variants: Record<string, string> = {
       active: "bg-success/10 text-success border-success/20",
+      closed: "bg-red-100 text-red-700 border-red-300", // RED
+      paused: "bg-yellow-100 text-yellow-700 border-yellow-300", // YELLOW
       mature: "bg-purple-500/10 text-purple-600 border-purple-500/20",
-      closed: "bg-muted text-muted-foreground border-border",
       completed: "bg-muted text-muted-foreground border-border",
       pending: "bg-warning/10 text-warning border-warning/20",
     };
-    return variants[status] ?? "bg-muted";
+    return variants[s] ?? "bg-muted text-muted-foreground border-border";
   };
+
+  const getStatusLabel = (status?: string) =>
+    normalizeStatus(status).toUpperCase();
 
   // UPDATED handleClose -> call server API via RTK mutation, keep store fallback
   const handleClose = async () => {
@@ -382,7 +393,7 @@ export default function InvestmentManagement(): JSX.Element {
                 getStatusBadge(investment.status)
               )}
             >
-              {investment.status.toUpperCase()}
+              {getStatusLabel(investment.status)}
             </Badge>
           </div>
 

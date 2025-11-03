@@ -1,3 +1,7 @@
+export type ReferralInvestmentType =
+  | "ReferralOnePercent"
+  | "ReferralThreeMonths";
+
 export interface InvestmentPortfolioRawResponse {
   walletBalance: string;
   investmentWallet: string;
@@ -53,4 +57,5 @@ export type CreateInvestmentRequest = {
   forWhome: string;
   duration: string;
   referralCode?: string;
+  referralInvestmentType?: ReferralInvestmentType;
 };

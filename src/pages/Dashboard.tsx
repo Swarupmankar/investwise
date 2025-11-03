@@ -1,5 +1,4 @@
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import {
@@ -11,7 +10,6 @@ import {
   Calendar,
   Clock,
 } from "lucide-react";
-import MonthlyReturns from "@/components/MonthlyReturns";
 import { cn } from "@/lib/utils";
 import NotificationBanner from "@/components/NotificationBanner";
 import { useNavigate } from "react-router-dom";
@@ -33,12 +31,17 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination";
-
 import {
   useGetAllInvestmentsQuery,
   useGetInvestmentPortfolioQuery,
 } from "@/API/investmentApi";
 import { useIsAnsweredQuery } from "@/API/onbording.api";
+
+const normalizeStatus = (raw?: string) => {
+  const s = String(raw || "").toLowerCase();
+  if (s === "archived" || s === "archive") return "closed"; // show as CLOSED
+  return s;
+};
 
 // helper functions (unchanged)
 const firstOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1);
@@ -277,19 +280,22 @@ export default function Dashboard() {
     Number.isFinite(n ?? NaN) ? (n as number).toLocaleString() : "0";
 
   // Status badge — includes PAUSED and ARCHIVE with readable colors
-  const getStatusBadge = (status: string) => {
-    const s = (status || "").toLowerCase();
+  const getStatusBadge = (status?: string) => {
+    const s = normalizeStatus(status);
     const variants: Record<string, string> = {
       active: "bg-success/10 text-success border-success/20",
-      archive: "bg-muted text-muted-foreground border-border",
-      paused: "bg-yellow-100 text-yellow-700 border-yellow-300", // visible yellow
-      // keep previous mappings for compatibility
+      closed: "bg-red-100 text-red-700 border-red-300", // RED for archived → closed
+      paused: "bg-yellow-100 text-yellow-700 border-yellow-300", // YELLOW for paused
       mature: "bg-purple-500/10 text-purple-600 border-purple-500/20",
-      closed: "bg-muted text-muted-foreground border-border",
       completed: "bg-muted text-muted-foreground border-border",
       pending: "bg-warning/10 text-warning border-warning/20",
     };
     return variants[s] ?? "bg-muted text-muted-foreground border-border";
+  };
+
+  const getStatusLabel = (status?: string) => {
+    const s = normalizeStatus(status);
+    return s.toUpperCase(); // CLOSED / PAUSED / ACTIVE...
   };
 
   const dashboardStats = useMemo(
@@ -514,7 +520,7 @@ export default function Dashboard() {
                         getStatusBadge(investment.status)
                       )}
                     >
-                      {String(investment.status || "").toUpperCase()}
+                      {getStatusLabel(investment.status)}
                     </Badge>
                   </div>
 

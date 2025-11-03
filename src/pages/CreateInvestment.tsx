@@ -1,4 +1,6 @@
-// src/pages/CreateInvestment.tsx
+// src/pages/CreateInvestment.tsx (MERGED)
+// New multi-plan UI + Old integrated API/validation/submit flow
+
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,18 +29,35 @@ import {
   useGetInvestmentPortfolioQuery,
 } from "@/API/investmentApi";
 
-const monthlyGrowthPlan = {
-  id: 1,
-  name: "Monthly Growth",
-  roi: 5.0,
-  roiPeriod: "per month",
-  minWithdrawal: 100,
-  duration: "1 month",
-  description:
-    "Earn 5% monthly returns with flexible deposits and easy withdrawals.",
-  risk: "Medium",
-  isAvailable: true,
-};
+// ---- New UI: multiple plans ----
+const investmentPlans = [
+  {
+    id: 1,
+    name: "Monthly Growth",
+    roi: 5.0,
+    roiPeriod: "per month",
+    minWithdrawal: 100,
+    duration: "1 month",
+    description:
+      "Earn 5% monthly returns with flexible deposits and 1% referral bonus.",
+    risk: "Medium",
+    isAvailable: true,
+    referralBonus: 1,
+  },
+  {
+    id: 2,
+    name: "Quarterly Premium",
+    roi: 5.0,
+    roiPeriod: "per month",
+    minWithdrawal: 100,
+    duration: "3 months",
+    description:
+      "Earn 5% monthly returns with 3-month commitment and 5% referral bonus.",
+    risk: "Medium",
+    isAvailable: true,
+    referralBonus: 5,
+  },
+] as const;
 
 export default function CreateInvestment() {
   const navigate = useNavigate();
@@ -46,36 +65,34 @@ export default function CreateInvestment() {
   const { createInvestment: localCreateInvestment } = useInvestmentStore();
 
   const [currentStep, setCurrentStep] = useState(1);
-  const [selectedPlan, setSelectedPlan] = useState<any>(monthlyGrowthPlan);
+  const [selectedPlan, setSelectedPlan] = useState<
+    (typeof investmentPlans)[number] | null
+  >(null);
   const [investmentAmount, setInvestmentAmount] = useState("");
   const [investmentName, setInvestmentName] = useState("");
-  const [proofFile, setProofFile] = useState<File | null>(null);
-
-  // Questionnaire state — human-readable values
-  const [investmentPurpose, setInvestmentPurpose] = useState(""); // e.g. "For myself"
-  const [investmentDuration, setInvestmentDuration] = useState(""); // e.g. "1 to 3 months"
   const [referralCode, setReferralCode] = useState("");
 
-  // portfolio/stats fetched from server (used for available funds)
+  // Questionnaire state — store human-readable strings (server expects this)
+  const [investmentPurpose, setInvestmentPurpose] = useState(""); // e.g., "For myself"
+  const [investmentDuration, setInvestmentDuration] = useState(""); // e.g., "1 to 3 months"
+
+  // --- Server data (authoritative wallet balance) ---
   const {
     data: portfolio,
-    isLoading: portfolioLoading,
     isFetching: portfolioFetching,
     isError: portfolioError,
   } = useGetInvestmentPortfolioQuery();
-
-  // live available balance from server (fallback to 0)
   const availableBalance = Number(portfolio?.walletBalance ?? 0);
 
-  // RTK Query mutation hook
+  // --- RTK mutation ---
   const [createInvestmentApi, { isLoading: createLoading }] =
     useCreateInvestmentMutation();
 
-  // SEO: title + meta
+  // SEO
   useEffect(() => {
-    document.title = "Monthly Growth Investment | Create Investment";
+    document.title = "Create Investment | Choose Your Plan";
     const desc =
-      "Create a Monthly Growth investment and earn 5% monthly returns.";
+      "Choose from multiple investment plans including Monthly Growth and Quarterly Premium with competitive returns and referral bonuses.";
     let meta = document.querySelector(
       'meta[name="description"]'
     ) as HTMLMetaElement | null;
@@ -98,8 +115,11 @@ export default function CreateInvestment() {
     }
   }, []);
 
-  // handlers
-  const handlePlanSelect = (plan: any) => {
+  // Helpers
+  const formatCurrency = (n?: number) =>
+    Number.isFinite(n ?? NaN) ? (n as number).toLocaleString() : "0";
+
+  const handlePlanSelect = (plan: (typeof investmentPlans)[number]) => {
     setSelectedPlan(plan);
     setCurrentStep(2);
   };
@@ -135,11 +155,13 @@ export default function CreateInvestment() {
       return;
     }
 
-    // Validate against server-side funds (portfolio)
+    // Validate against server-side funds
     if (amount > availableBalance) {
       toast({
         title: "Insufficient Funds",
-        description: `You only have $${availableBalance.toLocaleString()} available in your wallet`,
+        description: `You only have $${formatCurrency(
+          availableBalance
+        )} available in your wallet`,
         variant: "destructive",
       });
       return;
@@ -160,16 +182,18 @@ export default function CreateInvestment() {
     setCurrentStep(4);
   };
 
-  // --------- FIX: use proper typed payload instead of Record<string, any> ----------
   type CreateInvestmentPayload = {
     amount: number;
     name: string;
     forWhome: string;
     duration: string;
     referralCode?: string;
+    referralInvestmentType?: "ReferralOnePercent" | "ReferralThreeMonths";
   };
 
   const handleConfirmInvestment = async () => {
+    if (!selectedPlan) return;
+
     if (!investmentPurpose || !investmentDuration) {
       toast({
         title: "Missing selection",
@@ -182,17 +206,22 @@ export default function CreateInvestment() {
 
     const payload: CreateInvestmentPayload = {
       amount: Number(investmentAmount),
-      name: investmentName?.trim()
-        ? investmentName.trim()
-        : selectedPlan?.name ?? "",
+      name: investmentName?.trim() ? investmentName.trim() : selectedPlan.name,
       forWhome: investmentPurpose,
       duration: investmentDuration,
+      referralInvestmentType:
+        selectedPlan.id === 1
+          ? "ReferralOnePercent"
+          : selectedPlan.id === 2
+          ? "ReferralThreeMonths"
+          : undefined,
     };
-
     if (referralCode?.trim()) payload.referralCode = referralCode.trim();
 
     try {
-      const res = await createInvestmentApi(payload).unwrap();
+      await createInvestmentApi(payload).unwrap();
+
+      // best-effort local store update (keeps dashboard snappy)
       try {
         localCreateInvestment(
           `plan_${selectedPlan.id}`,
@@ -201,9 +230,7 @@ export default function CreateInvestment() {
           selectedPlan.roi,
           investmentName || undefined
         );
-      } catch (e) {
-        // ignore local update errors
-      }
+      } catch (_) {}
 
       toast({
         title: "Investment Created Successfully!",
@@ -211,11 +238,9 @@ export default function CreateInvestment() {
           investmentAmount
         ).toLocaleString()} has been submitted.`,
       });
-
       navigate("/");
     } catch (err: any) {
       const errorMessage = err?.data?.message || err?.message || "";
-
       if (
         errorMessage.includes("referral") ||
         errorMessage.includes("Referral") ||
@@ -230,12 +255,10 @@ export default function CreateInvestment() {
           variant: "destructive",
         });
       } else {
-        // For other errors, show the server message
         const serverMessage =
           errorMessage ||
           err?.data?.errors ||
           "Failed to create investment. Please try again.";
-
         toast({
           title: "Create Failed",
           description: String(serverMessage),
@@ -245,102 +268,116 @@ export default function CreateInvestment() {
     }
   };
 
-  // small helpers
-  const formatCurrency = (n?: number) =>
-    Number.isFinite(n ?? NaN) ? (n as number).toLocaleString() : "0";
+  // --- Derived UI bits for mapping values (radio values -> human readable) ---
+  // Keep radio values already human-readable to match the old API. No mapping needed.
 
-  // -- Render steps (inside component) --
+  // ---- Renders ----
   const renderStep1 = () => (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-6 animate-fade-in">
       <div className="text-center space-y-2">
         <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-gradient-to-br from-primary to-primary/80 shadow-lg">
           <TrendingUp className="h-6 w-6 text-primary-foreground" />
         </div>
         <div className="space-y-1">
-          <h1 className="text-2xl font-bold text-foreground">
-            Monthly Growth Plan
+          <h1 className="text-2xl md:text-3xl font-bold text-foreground">
+            Choose Your Investment Plan
           </h1>
           <p className="text-muted-foreground text-base max-w-2xl mx-auto">
-            Earn consistent 5% monthly returns with flexible deposits.
+            Select the plan that best fits your investment goals
           </p>
         </div>
       </div>
 
-      <div className="max-w-2xl mx-auto">
-        <Card className="relative overflow-hidden ring-1 ring-primary/10 shadow-xl">
-          <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-primary/10 to-transparent" />
+      <div className="max-w-5xl mx-auto grid md:grid-cols-2 gap-4 md:gap-6">
+        {investmentPlans.map((plan) => (
+          <Card
+            key={plan.id}
+            className="relative overflow-hidden ring-1 ring-primary/10 shadow-xl hover:shadow-2xl transition-all duration-300 hover:-translate-y-1"
+          >
+            <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-primary/10 to-transparent" />
 
-          <CardHeader className="p-6 sm:p-8 pb-4 sm:pb-6">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div className="flex items-start gap-4">
-                <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-gradient-to-br from-primary to-primary/80 shadow-md">
-                  <TrendingUp className="h-7 w-7 text-primary-foreground" />
+            <CardHeader className="p-4 sm:p-6 pb-3 sm:pb-4">
+              <div className="flex items-start gap-3">
+                <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-gradient-to-br from-primary to-primary/80 shadow-md flex-shrink-0">
+                  <TrendingUp className="h-6 w-6 text-primary-foreground" />
                 </div>
-                <div>
-                  <CardTitle className="text-2xl sm:text-3xl">
-                    {monthlyGrowthPlan.name}
+                <div className="flex-1">
+                  <CardTitle className="text-xl sm:text-2xl">
+                    {plan.name}
                   </CardTitle>
-                  <p className="text-sm sm:text-base text-muted-foreground">
-                    {monthlyGrowthPlan.description}
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {plan.description}
                   </p>
                 </div>
               </div>
-              <div className="text-center sm:text-right">
-                <div className="text-4xl font-extrabold text-primary">
-                  {monthlyGrowthPlan.roi}%
+              <div className="text-center mt-4 p-3 bg-primary/5 rounded-lg">
+                <div className="text-3xl sm:text-4xl font-extrabold text-primary">
+                  {plan.roi}%
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  {monthlyGrowthPlan.roiPeriod}
+                  {plan.roiPeriod}
                 </p>
               </div>
-            </div>
-          </CardHeader>
+            </CardHeader>
 
-          <CardContent className="p-6 sm:p-8 pt-0 space-y-6">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
-                <span className="text-sm text-muted-foreground">
-                  Min Withdrawal
-                </span>
-                <span className="text-base font-bold text-foreground">
-                  ${monthlyGrowthPlan.minWithdrawal}
-                </span>
+            <CardContent className="p-4 sm:p-6 pt-0 space-y-4">
+              <div className="grid grid-cols-1 gap-2">
+                <div className="flex items-center justify-between p-2.5 bg-muted/30 rounded-lg">
+                  <span className="text-xs sm:text-sm text-muted-foreground">
+                    Min Withdrawal
+                  </span>
+                  <span className="text-sm sm:text-base font-bold text-foreground">
+                    ${plan.minWithdrawal}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between p-2.5 bg-muted/30 rounded-lg">
+                  <span className="text-xs sm:text-sm text-muted-foreground">
+                    Min Duration
+                  </span>
+                  <span className="text-sm sm:text-base font-bold text-foreground">
+                    {plan.duration}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between p-2.5 bg-muted/30 rounded-lg">
+                  <span className="text-xs sm:text-sm text-muted-foreground">
+                    Deposit Limit
+                  </span>
+                  <span className="text-sm sm:text-base font-bold text-foreground">
+                    No Limit
+                  </span>
+                </div>
+                {"referralBonus" in plan && (plan as any).referralBonus > 0 && (
+                  <div className="flex items-center justify-between p-2.5 bg-amber-500/10 rounded-lg border border-amber-500/20">
+                    <span className="text-xs sm:text-sm text-amber-700 dark:text-amber-400 font-medium">
+                      Referral Earnings
+                    </span>
+                    <span className="text-sm sm:text-base font-bold text-amber-700 dark:text-amber-400">
+                      {(plan as any).referralBonus}%
+                    </span>
+                  </div>
+                )}
               </div>
-              <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
-                <span className="text-sm text-muted-foreground">
-                  Min Duration
-                </span>
-                <span className="text-base font-bold text-foreground">
-                  {monthlyGrowthPlan.duration}
-                </span>
-              </div>
-              <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
-                <span className="text-sm text-muted-foreground">
-                  Deposit Limit
-                </span>
-                <span className="text-base font-bold text-foreground">
-                  No Limit
-                </span>
-              </div>
-            </div>
 
-            <Button
-              onClick={() => handlePlanSelect(monthlyGrowthPlan)}
-              className="w-full h-12 text-base font-semibold rounded-lg gradient-primary text-white shadow-lg hover:shadow-xl"
-            >
-              Continue
-              <ArrowRight className="h-5 w-5 ml-2" />
-            </Button>
-          </CardContent>
-        </Card>
+              <Button
+                onClick={() => handlePlanSelect(plan)}
+                variant="default"
+                size="lg"
+                className="w-full text-base font-semibold"
+              >
+                Select {plan.name}
+                <ArrowRight className="h-5 w-5 ml-2" />
+              </Button>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
 
-        <div className="mt-6 text-center space-y-2">
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-primary/10 rounded-full">
-            <Shield className="h-4 w-4 text-primary" />
-            <span className="text-primary font-semibold text-sm">
-              All investments are secured and regulated
-            </span>
-          </div>
+      <div className="mt-6 text-center space-y-2">
+        <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-primary/10 rounded-full">
+          <Shield className="h-4 w-4 text-primary" />
+          <span className="text-primary font-semibold text-sm">
+            All investments are secured and regulated
+          </span>
         </div>
       </div>
     </div>
@@ -374,7 +411,7 @@ export default function CreateInvestment() {
           </div>
         </div>
 
-        {/* Wallet Balance Display (live from portfolio API) */}
+        {/* Wallet Balance from server */}
         <div className="p-3 bg-gradient-to-br from-blue-500/5 to-blue-600/10 rounded-lg border border-blue-500/20">
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">
@@ -402,7 +439,7 @@ export default function CreateInvestment() {
             Investment Amount (USD)
           </Label>
           <div className="relative">
-            <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               id="amount"
               type="number"
@@ -449,7 +486,7 @@ export default function CreateInvestment() {
             Investment Name (Optional)
           </Label>
           <div className="relative">
-            <Target className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Target className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               id="investmentName"
               type="text"
@@ -465,7 +502,7 @@ export default function CreateInvestment() {
         </div>
 
         {/* Calculation Display */}
-        {investmentAmount && Number(investmentAmount) > 0 && (
+        {investmentAmount && Number(investmentAmount) > 0 && selectedPlan && (
           <div className="p-3 bg-gradient-to-br from-success/5 to-emerald/5 border border-success/20 rounded-lg animate-scale-in">
             <div className="grid grid-cols-3 gap-3 text-center text-xs">
               <div>
@@ -479,7 +516,7 @@ export default function CreateInvestment() {
                 <p className="text-lg font-bold text-success">
                   $
                   {(
-                    (Number(investmentAmount) * selectedPlan?.roi) /
+                    (Number(investmentAmount) * selectedPlan.roi) /
                     100
                   ).toLocaleString()}
                 </p>
@@ -490,7 +527,7 @@ export default function CreateInvestment() {
                   $
                   {(
                     Number(investmentAmount) +
-                    (Number(investmentAmount) * selectedPlan?.roi) / 100
+                    (Number(investmentAmount) * selectedPlan.roi) / 100
                   ).toLocaleString()}
                 </p>
               </div>
@@ -512,7 +549,8 @@ export default function CreateInvestment() {
         <Button
           onClick={handleAmountSubmit}
           disabled={!investmentAmount || Number(investmentAmount) <= 0}
-          className="flex-1 h-10 gradient-primary text-white shadow-lg hover:shadow-xl disabled:opacity-50"
+          variant="default"
+          className="flex-1"
         >
           Continue
           <ArrowRight className="h-4 w-4 ml-2" />
@@ -536,7 +574,7 @@ export default function CreateInvestment() {
       </div>
 
       <div className="card-premium p-6 space-y-6">
-        {/* Question 2: Investment Purpose - human-readable values */}
+        {/* Purpose (human-readable values) */}
         <div className="space-y-3">
           <Label className="text-sm font-semibold flex items-center gap-2">
             <Users className="h-4 w-4" />
@@ -544,9 +582,7 @@ export default function CreateInvestment() {
           </Label>
           <RadioGroup
             value={investmentPurpose}
-            onValueChange={(v) => {
-              setInvestmentPurpose(v);
-            }}
+            onValueChange={setInvestmentPurpose}
           >
             <div className="flex items-center space-x-2 p-3 rounded-lg border hover:bg-muted/30 transition-colors">
               <RadioGroupItem value="For myself" id="myself" />
@@ -575,7 +611,7 @@ export default function CreateInvestment() {
           </RadioGroup>
         </div>
 
-        {/* Question 3: Investment Duration - human-readable values */}
+        {/* Duration (human-readable values) */}
         <div className="space-y-3">
           <Label className="text-sm font-semibold flex items-center gap-2">
             <Clock className="h-4 w-4" />
@@ -586,9 +622,7 @@ export default function CreateInvestment() {
           </p>
           <RadioGroup
             value={investmentDuration}
-            onValueChange={(v) => {
-              setInvestmentDuration(v);
-            }}
+            onValueChange={setInvestmentDuration}
           >
             <div className="flex items-center space-x-2 p-3 rounded-lg border hover:bg-muted/30 transition-colors">
               <RadioGroupItem value="1 to 3 months" id="1-3months" />
@@ -623,7 +657,7 @@ export default function CreateInvestment() {
           </RadioGroup>
         </div>
 
-        {/* Question 4: Referral Code */}
+        {/* Referral */}
         <div className="space-y-3">
           <Label
             htmlFor="referralCode"
@@ -633,15 +667,13 @@ export default function CreateInvestment() {
             Would you like to make this investment under a referral code?
           </Label>
           <div className="relative">
-            <Gift className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Gift className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               id="referralCode"
               type="text"
               placeholder="Enter referral code (optional)"
               value={referralCode}
-              onChange={(e) => {
-                setReferralCode(e.target.value);
-              }}
+              onChange={(e) => setReferralCode(e.target.value)}
               className="pl-10 h-10 text-base bg-white border-2 focus:border-primary/50"
             />
           </div>
@@ -659,7 +691,7 @@ export default function CreateInvestment() {
             <div>
               <span className="text-muted-foreground">Amount:</span>
               <span className="ml-2 font-semibold">
-                ${Number(investmentAmount).toLocaleString()}
+                ${Number(investmentAmount || 0).toLocaleString()}
               </span>
             </div>
             <div>
@@ -725,6 +757,7 @@ export default function CreateInvestment() {
       </div>
 
       <div className="space-y-3">
+        {/* Investment Summary Card */}
         <div className="card-premium p-4 space-y-3">
           <div className="text-center">
             <h3 className="text-lg font-bold text-foreground">
@@ -759,12 +792,13 @@ export default function CreateInvestment() {
             <div className="flex items-center justify-between py-1">
               <span className="text-muted-foreground">Investment Amount</span>
               <span className="font-bold text-foreground text-lg">
-                ${Number(investmentAmount).toLocaleString()}
+                ${Number(investmentAmount || 0).toLocaleString()}
               </span>
             </div>
           </div>
         </div>
 
+        {/* Projection Card */}
         <div className="card-premium p-4 bg-gradient-to-br from-success/5 to-emerald-500/5 border-success/20">
           <div className="space-y-3">
             <div className="text-center">
@@ -773,36 +807,38 @@ export default function CreateInvestment() {
               </h3>
             </div>
 
-            <div className="grid grid-cols-3 gap-3 text-center text-xs">
-              <div className="p-2 bg-white/50 rounded-lg">
-                <p className="text-muted-foreground">Expected Profit</p>
-                <p className="text-lg font-bold text-success">
-                  $
-                  {(
-                    (Number(investmentAmount) * selectedPlan?.roi) /
-                    100
-                  ).toLocaleString()}
-                </p>
-              </div>
+            {selectedPlan && (
+              <div className="grid grid-cols-3 gap-3 text-center text-xs">
+                <div className="p-2 bg-white/50 rounded-lg">
+                  <p className="text-muted-foreground">Expected Profit</p>
+                  <p className="text-lg font-bold text-success">
+                    $
+                    {(
+                      (Number(investmentAmount || 0) * selectedPlan.roi) /
+                      100
+                    ).toLocaleString()}
+                  </p>
+                </div>
 
-              <div className="p-2 bg-gradient-to-br from-primary/10 to-primary/5 rounded-lg">
-                <p className="text-muted-foreground">Total Value</p>
-                <p className="text-lg font-bold text-gradient">
-                  $
-                  {(
-                    Number(investmentAmount) +
-                    (Number(investmentAmount) * selectedPlan?.roi) / 100
-                  ).toLocaleString()}
-                </p>
-              </div>
+                <div className="p-2 bg-gradient-to-br from-primary/10 to-primary/5 rounded-lg">
+                  <p className="text-muted-foreground">Total Value</p>
+                  <p className="text-lg font-bold text-gradient">
+                    $
+                    {(
+                      Number(investmentAmount || 0) +
+                      (Number(investmentAmount || 0) * selectedPlan.roi) / 100
+                    ).toLocaleString()}
+                  </p>
+                </div>
 
-              <div className="p-2 bg-white/30 rounded-lg">
-                <p className="text-muted-foreground">Profit Margin</p>
-                <p className="text-lg font-bold text-success">
-                  {selectedPlan?.roi}%
-                </p>
+                <div className="p-2 bg-white/30 rounded-lg">
+                  <p className="text-muted-foreground">Profit Margin</p>
+                  <p className="text-lg font-bold text-success">
+                    {selectedPlan.roi}%
+                  </p>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       </div>
@@ -829,6 +865,11 @@ export default function CreateInvestment() {
     </div>
   );
 
+  // Ensure a default selected plan (for deep links to step 2+)
+  useEffect(() => {
+    if (!selectedPlan) setSelectedPlan(investmentPlans[0]);
+  }, [selectedPlan]);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/30 p-4">
       <div className="max-w-4xl mx-auto">
@@ -843,7 +884,7 @@ export default function CreateInvestment() {
             Back to Dashboard
           </Button>
 
-          {/* Progress Steps */}
+          {/* Enhanced Progress Steps */}
           <div className="flex items-center gap-2">
             {[
               { step: 1, label: "Select Plan" },
@@ -905,9 +946,4 @@ export default function CreateInvestment() {
       </div>
     </div>
   );
-}
-
-// small helper for currency formatting (kept outside to avoid redeclaring in render)
-function formatCurrency(n?: number) {
-  return Number.isFinite(n ?? NaN) ? (n as number).toLocaleString() : "0";
 }

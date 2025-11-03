@@ -669,31 +669,6 @@ export default function Referrals() {
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex gap-3">
-              <div className="flex-1 p-3 bg-muted/30 rounded-lg border border-border">
-                <Input
-                  value={referralLink || "No referral code available"}
-                  readOnly
-                  className={cn(
-                    "bg-transparent border-none text-foreground font-mono text-sm p-0 focus-visible:ring-0",
-                    statsError && "text-destructive"
-                  )}
-                />
-              </div>
-              <Button
-                onClick={() => copyToClipboard(referralLink)}
-                variant="outline"
-                className="px-4 py-3 border-border hover:bg-muted/50"
-                disabled={
-                  !referralLink ||
-                  referralLink === "Failed to load referral code"
-                }
-              >
-                <Copy className="h-4 w-4 mr-2" />
-                Copy
-              </Button>
-            </div>
-
             {/* ✅ NEW Referral Code Field */}
             {statsData?.referral?.code && (
               <div className="flex gap-3">
