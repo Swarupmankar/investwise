@@ -376,7 +376,7 @@ export default function Broadcasts() {
         )}
 
         {!isLoading && isError && (
-          <div className="space-y-4 text-center max-w-3xl mx-auto">
+          <div className="space-y-4 ">
             <Card className="border-border">
               <CardContent className="p-8 sm:p-10 md:p-12 text-center">
                 <Bell className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
@@ -398,14 +398,19 @@ export default function Broadcasts() {
         )}
 
         {!isLoading && !isError && posts.length === 0 && (
-          <Card className="backdrop-blur-xl bg-card/80 border border-border/50 shadow-xl text-center p-8 max-w-3xl mx-auto">
-            <div className="mx-auto max-w-sm">
-              <CardTitle className="text-xl">No reports yet</CardTitle>
-              <CardDescription className="mt-2">
-                Please check back later.
-              </CardDescription>
-            </div>
-          </Card>
+          <div className="space-y-4">
+            <Card className="border-border">
+              <CardContent className="p-8 sm:p-10 md:p-12 text-center">
+                <Bell className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                <h3 className="text-base sm:text-lg font-semibold text-foreground mb-2">
+                  No Reports Yet
+                </h3>
+                <p className="text-muted-foreground mb-6">
+                  Please check back later for Reports.
+                </p>
+              </CardContent>
+            </Card>
+          </div>
         )}
 
         {posts.length > 0 && (

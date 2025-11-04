@@ -220,10 +220,6 @@ const WithdrawalVerification = ({
               ${withdrawal.amount.toLocaleString()}
             </span>
           </div>
-          <div className="flex justify-between items-center">
-            <span className="text-sm text-muted-foreground">Request ID</span>
-            <span className="text-sm font-mono">{withdrawal.id}</span>
-          </div>
         </div>
 
         {/* Status */}

@@ -1,4 +1,3 @@
-// InvestmentManagement.tsx
 import { useParams, useNavigate } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,7 +15,7 @@ import {
   CalendarDays,
   Info,
 } from "lucide-react";
-import { toast } from "sonner";
+
 import { cn } from "@/lib/utils";
 import { format, differenceInCalendarDays } from "date-fns";
 import {
@@ -24,6 +23,7 @@ import {
   useCloseInvestmentMutation,
 } from "@/API/investmentApi";
 import EmptyCard from "@/components/ui/EmptyCard";
+import { toast } from "@/hooks/use-toast";
 
 /** Helpers **/
 
@@ -143,7 +143,6 @@ const computeMonthlyCycle = (startDateCandidate?: Date) => {
     totalDays,
     progressPct: Math.max(0, Math.min(100, progressPct)),
     progressRounded: Math.round(Math.max(0, Math.min(100, progressPct))),
-    // FIX: allow closing on the 1st
     isFirstOfMonthToday: now.getDate() === 1,
   };
 };
@@ -316,22 +315,32 @@ export default function InvestmentManagement(): JSX.Element {
   // Close investment (single-toast, backend message first)
   const handleClose = async () => {
     if (isClosed) {
-      toast.info("This investment is already closed.");
+      toast({ title: "This investment is already closed." });
       return;
     }
 
     if (!isFirstOfMonthToday) {
-      toast.error("You can close an investment only on the 1st of each month.");
+      toast({
+        title: "You can close an investment only on the 1st of each month.",
+        variant: "destructive",
+      });
       return;
     }
 
     const invIdNum = normalizeId(investment.id);
     if (!invIdNum) {
-      toast.error("Invalid investment id");
+      toast({
+        title: "Invalid investment,Please Contact Support",
+        variant: "destructive",
+      });
       return;
     }
 
-    const toastId = toast.loading("Closing investment...");
+    const t = toast({
+      title: "Closing investment...",
+      description: "Please wait",
+      duration: 600000,
+    });
 
     try {
       const res: any = await closeInvestmentApi(invIdNum).unwrap();
@@ -358,12 +367,23 @@ export default function InvestmentManagement(): JSX.Element {
 
       const fallbackMsg = `Investment closed successfully. Principal will be available in ${etaDays} days${extraDatePart}.`;
 
-      toast.success(serverMsg || fallbackMsg, { id: toastId });
+      t.update({
+        title: serverMsg || fallbackMsg,
+        description: undefined,
+        duration: 3000,
+        id: "",
+      });
+
       navigate("/");
     } catch (err: any) {
       const msg =
         err?.data?.message ?? err?.message ?? "Failed to close investment";
-      toast.error(String(msg), { id: toastId });
+      t.update({
+        title: String(msg),
+        variant: "destructive",
+        duration: 5000,
+        id: "",
+      });
     }
   };
 
