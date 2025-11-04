@@ -208,7 +208,8 @@ const computeReferralThreeMonthCycle = (startDateCandidate?: Date) => {
     totalDays,
     progressPct: Math.max(0, Math.min(100, progressPct)),
     progressRounded: Math.round(Math.max(0, Math.min(100, progressPct))),
-    isFirstOfMonthToday: now.getDate() === 1,
+    // isFirstOfMonthToday: now.getDate() === 4,
+    isFirstOfMonthToday: [4, 5].includes(now.getDate()),
   };
 };
 /** Component **/
