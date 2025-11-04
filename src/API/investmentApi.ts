@@ -7,6 +7,7 @@ import {
   InvestmentPortfolio,
   InvestmentPortfolioRawResponse,
   InvestmentRaw,
+  ReferralInvestmentType,
 } from "@/types/investment/investment.types";
 import { parseDuration } from "./helpers";
 
@@ -18,10 +19,11 @@ const toIso = (v: unknown): string => {
 
 export const investmentApi = baseApi.injectEndpoints({
   endpoints: (build) => ({
-
     getInvestmentPortfolio: build.query<InvestmentPortfolio, void>({
       query: () => ({ url: ENDPOINTS.INVESTMENT.PORTFOLIO, method: "GET" }),
-      providesTags: (_res) => [{ type: "Investment" as const, id: "PORTFOLIO" }],
+      providesTags: (_res) => [
+        { type: "Investment" as const, id: "PORTFOLIO" },
+      ],
       transformResponse: (res: unknown) => {
         const payload = (res ?? {}) as InvestmentPortfolioRawResponse;
 
@@ -44,7 +46,10 @@ export const investmentApi = baseApi.injectEndpoints({
 
     // all-investments
     getAllInvestments: build.query<InvestmentNormalized[], void>({
-      query: () => ({ url: ENDPOINTS.INVESTMENT.ALL_INVESTMENTS, method: "GET" }),
+      query: () => ({
+        url: ENDPOINTS.INVESTMENT.ALL_INVESTMENTS,
+        method: "GET",
+      }),
       providesTags: (_res) => [{ type: "Investment" as const, id: "ALL" }],
       transformResponse: (res: unknown) => {
         const items = Array.isArray(res) ? (res as InvestmentRaw[]) : [];
@@ -53,8 +58,12 @@ export const investmentApi = baseApi.injectEndpoints({
           const amount = Number(String(it.amount ?? "0").replace(/,/g, ""));
           const returns = Number(String(it.returns ?? "0").replace(/,/g, ""));
 
-          const createdAtIso = it.createdAt ? toIso(it.createdAt) : toIso(Date.now());
-          const updatedAtIso = it.updatedAt ? toIso(it.updatedAt) : createdAtIso;
+          const createdAtIso = it.createdAt
+            ? toIso(it.createdAt)
+            : toIso(Date.now());
+          const updatedAtIso = it.updatedAt
+            ? toIso(it.updatedAt)
+            : createdAtIso;
 
           const { months, days } = parseDuration(it.duration);
 
@@ -78,10 +87,14 @@ export const investmentApi = baseApi.injectEndpoints({
             startDate: createdAtIso,
 
             roi: 0,
+
+            // NEW: pass-through from API
+            referralInvestmentType:
+              ((it.referralInvestmentType ??
+                null) as ReferralInvestmentType | null) || undefined,
           };
         });
 
-        // sort using parsed dates (no Date objects stored)
         parsed.sort(
           (a, b) =>
             new Date(b.createdAt as unknown as string).getTime() -
@@ -93,52 +106,71 @@ export const investmentApi = baseApi.injectEndpoints({
     }),
 
     // single-investment
-    getInvestment: build.query<InvestmentNormalized | undefined, number | void>({
-      query: (id) => ({
-        url: `${ENDPOINTS.INVESTMENT.ALL_INVESTMENTS}${id ? `/${id}` : ""}`,
-        method: "GET",
-      }),
-      providesTags: (res, err, id) =>
-        id ? [{ type: "Investment" as const, id }] : [{ type: "Investment" as const, id: "ALL" }],
-      transformResponse: (res: unknown) => {
-        const it = res && !Array.isArray(res) ? (res as InvestmentRaw) : undefined;
-        if (!it) return undefined;
+    getInvestment: build.query<InvestmentNormalized | undefined, number | void>(
+      {
+        query: (id) => ({
+          url: `${ENDPOINTS.INVESTMENT.ALL_INVESTMENTS}${id ? `/${id}` : ""}`,
+          method: "GET",
+        }),
+        providesTags: (res, err, id) =>
+          id
+            ? [{ type: "Investment" as const, id }]
+            : [{ type: "Investment" as const, id: "ALL" }],
+        transformResponse: (res: unknown) => {
+          const it =
+            res && !Array.isArray(res) ? (res as InvestmentRaw) : undefined;
+          if (!it) return undefined;
 
-        const amount = Number(String(it.amount ?? "0").replace(/,/g, ""));
-        const thisMonthsReturnsRaw = it.thisMonthsReturns ?? it.returns ?? "0";
-        const thisMonthsReturns = Number(String(thisMonthsReturnsRaw).replace(/,/g, ""));
+          const amount = Number(String(it.amount ?? "0").replace(/,/g, ""));
+          const thisMonthsReturnsRaw =
+            it.thisMonthsReturns ?? it.returns ?? "0";
+          const thisMonthsReturns = Number(
+            String(thisMonthsReturnsRaw).replace(/,/g, "")
+          );
 
-        const createdAtIso = it.createdAt ? toIso(it.createdAt) : toIso(Date.now());
-        const updatedAtIso = it.updatedAt ? toIso(it.updatedAt) : createdAtIso;
+          const createdAtIso = it.createdAt
+            ? toIso(it.createdAt)
+            : toIso(Date.now());
+          const updatedAtIso = it.updatedAt
+            ? toIso(it.updatedAt)
+            : createdAtIso;
 
-        const { months, days } = parseDuration(it.duration);
+          const { months, days } = parseDuration(it.duration);
 
-        const parsed: InvestmentNormalized = {
-          id: Number(it.id),
-          name: it.name ?? `Investment #${it.id}`,
-          amount: Number.isFinite(amount) ? amount : 0,
-          forWhome: it.forWhome,
-          durationLabel: it.duration ?? "",
-          durationMonths: months,
-          durationDays: days,
-          duration: days,
-          status: String(it.investmentStatus ?? "").toLowerCase(),
-          returns: Number.isFinite(thisMonthsReturns) ? thisMonthsReturns : 0,
-          thisMonthsReturns: Number.isFinite(thisMonthsReturns) ? thisMonthsReturns : 0,
-          lastReturnsRecieved: it.lastReturnsRecieved ?? null,
-          userId: Number(it.userId ?? 0),
+          const parsed: InvestmentNormalized = {
+            id: Number(it.id),
+            name: it.name ?? `Investment #${it.id}`,
+            amount: Number.isFinite(amount) ? amount : 0,
+            forWhome: it.forWhome,
+            durationLabel: it.duration ?? "",
+            durationMonths: months,
+            durationDays: days,
+            duration: days,
+            status: String(it.investmentStatus ?? "").toLowerCase(),
+            returns: Number.isFinite(thisMonthsReturns) ? thisMonthsReturns : 0,
+            thisMonthsReturns: Number.isFinite(thisMonthsReturns)
+              ? thisMonthsReturns
+              : 0,
+            lastReturnsRecieved: it.lastReturnsRecieved ?? null,
+            userId: Number(it.userId ?? 0),
 
-          // keep strings in cache
-          createdAt: createdAtIso,
-          updatedAt: updatedAtIso,
-          startDate: createdAtIso,
+            // keep strings in cache
+            createdAt: createdAtIso,
+            updatedAt: updatedAtIso,
+            startDate: createdAtIso,
 
-          roi: 0,
-        };
+            roi: 0,
 
-        return parsed;
-      },
-    }),
+            // NEW: pass-through from API
+            referralInvestmentType:
+              ((it.referralInvestmentType ??
+                null) as ReferralInvestmentType | null) || undefined,
+          };
+
+          return parsed;
+        },
+      }
+    ),
 
     createInvestment: build.mutation<any, CreateInvestmentRequest>({
       query: (payload) => ({

@@ -1,3 +1,4 @@
+// InvestmentManagement.tsx
 import { useParams, useNavigate } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -69,6 +70,12 @@ const normalizeForUI = (raw: any) => {
     updatedAt,
     startDate,
     userId: normalizeId(raw.userId) ?? 0,
+
+    // IMPORTANT: read the normalized field (added in api.ts)
+    referralInvestmentType: raw.referralInvestmentType as
+      | "ReferralOnePercent"
+      | "ReferralThreeMonths"
+      | undefined,
   } as const;
 };
 
@@ -78,6 +85,7 @@ const firstOfNextMonth = (d: Date) =>
   new Date(d.getFullYear(), d.getMonth() + 1, 1);
 const lastOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
 
+/** 1-month rolling cycle (existing behavior) */
 const computeMonthlyCycle = (startDateCandidate?: Date) => {
   const now = new Date();
 
@@ -147,6 +155,62 @@ const computeMonthlyCycle = (startDateCandidate?: Date) => {
   };
 };
 
+/** 3-month referral cycle:
+ *  - start = creation date
+ *  - maturity = 1st of the month three months after creation month
+ *    (e.g., created Nov 4 ⇒ Feb 1; created Nov 29 ⇒ Feb 1)
+ */
+const computeReferralThreeMonthCycle = (startDateCandidate?: Date) => {
+  const now = new Date();
+
+  let startOfCycle: Date;
+  if (
+    startDateCandidate instanceof Date &&
+    !Number.isNaN(startDateCandidate.getTime())
+  ) {
+    startOfCycle = new Date(
+      startDateCandidate.getFullYear(),
+      startDateCandidate.getMonth(),
+      startDateCandidate.getDate()
+    );
+  } else {
+    startOfCycle = now;
+  }
+
+  // Maturity: 1st of the month three months after creation month
+  const maturityDate = new Date(
+    startOfCycle.getFullYear(),
+    startOfCycle.getMonth() + 3,
+    1
+  );
+
+  let totalDays = differenceInCalendarDays(maturityDate, startOfCycle);
+  if (totalDays <= 0) totalDays = 1;
+
+  let daysCompleted = differenceInCalendarDays(
+    now < maturityDate ? now : maturityDate,
+    startOfCycle
+  );
+  if (daysCompleted < 0) daysCompleted = 0;
+  if (daysCompleted > totalDays) daysCompleted = totalDays;
+
+  let daysRemaining = differenceInCalendarDays(maturityDate, now);
+  if (daysRemaining < 0) daysRemaining = 0;
+
+  const progressPct = (daysCompleted / totalDays) * 100;
+
+  return {
+    startOfCycle,
+    maturityDate,
+    daysInThisMonth: lastOfMonth(now).getDate(),
+    daysCompleted,
+    daysRemaining,
+    totalDays,
+    progressPct: Math.max(0, Math.min(100, progressPct)),
+    progressRounded: Math.round(Math.max(0, Math.min(100, progressPct))),
+    isFirstOfMonthToday: now.getDate() === 1,
+  };
+};
 /** Component **/
 export default function InvestmentManagement(): JSX.Element {
   const { id } = useParams();
@@ -284,8 +348,14 @@ export default function InvestmentManagement(): JSX.Element {
   // uiInvestment is defined
   const investment = uiInvestment as ReturnType<typeof normalizeForUI>;
 
-  // Monthly cycle logic
-  const cycle = computeMonthlyCycle(investment.startDate);
+  // Choose cycle logic based on referralInvestmentType
+  const isReferralThreeMonths =
+    String((uiInvestment as any)?.referralInvestmentType) ===
+    "ReferralThreeMonths";
+
+  const cycle = isReferralThreeMonths
+    ? computeReferralThreeMonthCycle(investment.startDate)
+    : computeMonthlyCycle(investment.startDate);
 
   const daysCompleted = cycle.daysCompleted;
   const daysRemaining = cycle.daysRemaining;

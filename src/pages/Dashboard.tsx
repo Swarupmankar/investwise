@@ -121,6 +121,65 @@ const computeMonthlyCycle = (referenceDate?: string | Date) => {
   };
 };
 
+/** NEW: 3-month referral cycle
+ * start = creation date
+ * maturity = 1st of the month three months after creation month
+ *   e.g., created Nov 04 ⇒ Feb 01; created Nov 29 ⇒ Feb 01
+ */
+const computeReferralThreeMonthCycle = (referenceDate?: string | Date) => {
+  const now = new Date();
+
+  let startOfCycle: Date;
+  if (referenceDate) {
+    const parsed = new Date(referenceDate);
+    if (!Number.isNaN(parsed.getTime())) {
+      startOfCycle = new Date(
+        parsed.getFullYear(),
+        parsed.getMonth(),
+        parsed.getDate()
+      );
+    } else {
+      startOfCycle = now;
+    }
+  } else {
+    startOfCycle = now;
+  }
+
+  const maturityDate = new Date(
+    startOfCycle.getFullYear(),
+    startOfCycle.getMonth() + 3,
+    1
+  );
+
+  const daysInThisMonth = lastOfMonth(now).getDate();
+
+  let totalDays = differenceInCalendarDays(maturityDate, startOfCycle);
+  if (totalDays <= 0) totalDays = 1;
+
+  let daysCompleted = differenceInCalendarDays(
+    now < maturityDate ? now : maturityDate,
+    startOfCycle
+  );
+  if (daysCompleted < 0) daysCompleted = 0;
+  if (daysCompleted > totalDays) daysCompleted = totalDays;
+
+  let daysRemaining = differenceInCalendarDays(maturityDate, now);
+  if (daysRemaining < 0) daysRemaining = 0;
+
+  const progressPct = (daysCompleted / totalDays) * 100;
+
+  return {
+    startDate: startOfCycle,
+    maturityDate,
+    daysInThisMonth,
+    daysCompleted,
+    daysRemaining,
+    totalDays,
+    progress: Math.round(Math.max(0, Math.min(100, progressPct))),
+    isFirstOfMonthToday: now.getDate() === 1,
+  };
+};
+
 /** Utilities: safe parsing (unchanged + small fallback) **/
 const parseNumber = (v: unknown): number | undefined => {
   if (v === undefined || v === null) return undefined;
@@ -155,8 +214,6 @@ export default function Dashboard() {
   const navigate = useNavigate();
 
   // NO-BLINK QUESTIONNAIRE:
-  // - Show immediately only if we *already know* from localStorage that it's incomplete ("false")
-  // - If we have no prior knowledge (null), wait for server before deciding (prevents flash)
   const stored = localStorage.getItem("questionnaireCompleted"); // "true" | "false" | null
   const [showQuestionnaireModal, setShowQuestionnaireModal] = useState<boolean>(
     stored === "false"
@@ -169,7 +226,7 @@ export default function Dashboard() {
   const [currentPage, setCurrentPage] = useState(1);
   const [investmentsPerPage, setInvestmentsPerPage] = useState(6);
 
-  // API hooks (unchanged)
+  // API hooks
   const { data: isAnsweredData, isLoading: isAnsweredLoading } =
     useIsAnsweredQuery();
 
@@ -188,7 +245,7 @@ export default function Dashboard() {
     refetch: refetchInvestments,
   } = useGetAllInvestmentsQuery();
 
-  // local state for displayed user (unchanged)
+  // local state for displayed user
   const [displayedUser, setDisplayedUser] = useState(() => ({
     walletBalance: 0,
     investmentWallet: 0,
@@ -221,8 +278,8 @@ export default function Dashboard() {
 
   // Decide questionnaire visibility without blink
   useEffect(() => {
-    if (!needsServerDecision) return; // We already decided from localStorage
-    if (isAnsweredLoading) return; // Wait for server so there's no flash
+    if (!needsServerDecision) return;
+    if (isAnsweredLoading) return;
 
     if (isAnsweredData?.allAnswered === true) {
       localStorage.setItem("questionnaireCompleted", "true");
@@ -237,7 +294,6 @@ export default function Dashboard() {
       return;
     }
 
-    // If API didn't provide a usable answer, don't change UI; avoid showing unexpectedly.
     setNeedsServerDecision(false);
   }, [needsServerDecision, isAnsweredLoading, isAnsweredData]);
 
@@ -372,7 +428,7 @@ export default function Dashboard() {
         </Button>
       </div>
 
-      {/* Modern Dashboard Summary Cards (kept from old UI) */}
+      {/* Modern Dashboard Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {dashboardStats.map((stat) => (
           <div
@@ -473,7 +529,18 @@ export default function Dashboard() {
             </div>
           ) : (
             paginatedInvestments.map((investment: any) => {
-              const cycle = computeMonthlyCycle(investment.startDate);
+              // Choose correct cycle:
+              // use normalized field coming from API transforms:
+              const isReferralThreeMonths =
+                String(investment?.referralInvestmentType) ===
+                "ReferralThreeMonths";
+
+              // Prefer createdAt for 3-month plan (start = creation date).
+              const cycle = isReferralThreeMonths
+                ? computeReferralThreeMonthCycle(
+                    investment.createdAt || investment.startDate
+                  )
+                : computeMonthlyCycle(investment.startDate);
 
               // ---------------------------
               // IMPORTANT: ROI stays hardcoded at 5% per your request
@@ -649,7 +716,7 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Pagination Controls (unchanged) */}
+        {/* Pagination Controls */}
         {totalPages > 1 && (
           <div className="flex justify-center mt-8">
             <Pagination>
