@@ -18,7 +18,7 @@ import {
   Megaphone,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { logout } from "@/API/auth.api"; // ⚠️ adjust import path to your slice
+import { logout } from "@/API/auth.api"; // adjust if needed
 
 const sidebarItems = [
   { path: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -41,23 +41,19 @@ function Layout() {
   const auth = useSelector((state: any) => state.auth);
   const user = auth?.user ?? null;
 
-  // Compute display name
   const displayName = useMemo(() => {
     if (!user) return "User";
     const { firstName, lastName, email } = user;
-    if (firstName || lastName) {
+    if (firstName || lastName)
       return `${firstName ?? ""} ${lastName ?? ""}`.trim();
-    }
     return email || "User";
   }, [user]);
 
-  // Compute initials
   const initials = useMemo(() => {
     if (!user) return "U";
     const { firstName, lastName, email } = user;
-    if (firstName && lastName) {
+    if (firstName && lastName)
       return (firstName[0] + lastName[0]).toUpperCase();
-    }
     if (firstName) return firstName[0].toUpperCase();
     if (email) return email[0].toUpperCase();
     return "U";
@@ -79,16 +75,17 @@ function Layout() {
       )}
 
       {/* Sidebar */}
-      <div
+      <aside
         className={cn(
-          "fixed left-0 top-0 h-full w-64 xl:w-72 z-50 transform transition-all duration-300 ease-out",
-          "bg-gradient-to-b from-sidebar-bg to-sidebar-bg/95 backdrop-blur-xl border-r border-sidebar-muted/20",
-          "shadow-2xl",
+          "fixed left-0 top-0 h-dvh w-64 xl:w-72 z-50 transform transition-all duration-300 ease-out",
+          "bg-gradient-to-b from-sidebar-bg to-sidebar-bg/95 backdrop-blur-xl border-r border-sidebar-muted/20 shadow-2xl",
           sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         )}
       >
-        <div className="p-8">
-          <div className="flex items-center justify-between mb-12">
+        {/* FLEX column that fills the sidebar height */}
+        <div className="h-full flex flex-col p-8">
+          {/* Brand / Close */}
+          <div className="flex items-center justify-between mb-8">
             <div className="flex items-center space-x-3">
               <div className="relative">
                 <div className="h-10 w-10 bg-gradient-to-br from-primary to-primary/80 rounded-xl flex items-center justify-center shadow-lg">
@@ -96,7 +93,7 @@ function Layout() {
                     V
                   </span>
                 </div>
-                <div className="absolute -top-1 -right-1 h-4 w-4 bg-success rounded-full border-2 border-sidebar-bg"></div>
+                <div className="absolute -top-1 -right-1 h-4 w-4 bg-success rounded-full border-2 border-sidebar-bg" />
               </div>
               <div>
                 <h1 className="text-xl font-semibold text-sidebar-foreground tracking-tight">
@@ -117,7 +114,15 @@ function Layout() {
             </Button>
           </div>
 
-          <nav className="space-y-2">
+          {/* Nav (scrollable but scrollbar HIDDEN) */}
+          <nav
+            className={cn(
+              "space-y-2 flex-1 pr-1", // takes remaining height
+              // hide scrollbar visually (still scrolls when needed)
+              "[scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+            )}
+            style={{ overflowY: "auto", paddingBottom: "0.5rem" }}
+          >
             {sidebarItems.map((item) => (
               <NavLink
                 key={item.path}
@@ -138,8 +143,9 @@ function Layout() {
             ))}
           </nav>
 
-          <div className="absolute bottom-8 left-8 right-8">
-            <div className="bg-sidebar-muted/30 backdrop-blur-sm rounded-xl p-4 mb-4">
+          {/* Footer stuck to bottom (NO absolute) */}
+          <div className="pt-4 mt-6">
+            <div className="bg-sidebar-muted/30 backdrop-blur-sm rounded-xl p-4 mb-3">
               <div className="flex items-center space-x-3">
                 <div className="h-10 w-10 rounded-full bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center">
                   <span className="text-white text-sm font-semibold">
@@ -166,7 +172,7 @@ function Layout() {
             </Button>
           </div>
         </div>
-      </div>
+      </aside>
 
       {/* Main Content */}
       <div className="lg:ml-64 xl:ml-72">
