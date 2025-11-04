@@ -3,9 +3,18 @@ export interface ReportRaw {
   title: string;
   summary: string | null;
   fileUrl: string | null;
+  fileUrls?: string[] | null;
   createdAt: string | null;
-  banner?: string | null; // optional legacy "name"
-  bannerUrl?: string | null; // API may send full URL
+  banner?: string | null;
+  bannerUrl?: string | null;
+}
+
+export interface ReportFile {
+  url: string;
+  name: string;
+  ext: string;
+  isPdf: boolean;
+  isImage: boolean;
 }
 
 export interface ReportNormalized {
@@ -15,12 +24,9 @@ export interface ReportNormalized {
   bannerName: string;
   bannerUrl: string;
   hasBanner: boolean;
-  fileUrl: string;
-  createdAt: string; 
-  fileName: string;
-  fileExt: string;
-  isPdf: boolean;
-  isImage: boolean;
+  files: ReportFile[];
+  hasFiles: boolean;
+  createdAt: string;
 }
 
 export type GetReportsResponse = ReportNormalized[];

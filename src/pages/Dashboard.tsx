@@ -13,7 +13,7 @@ import {
 import { cn } from "@/lib/utils";
 import NotificationBanner from "@/components/NotificationBanner";
 import { useNavigate } from "react-router-dom";
-import { format, addDays, differenceInCalendarDays } from "date-fns";
+import { format, differenceInCalendarDays } from "date-fns";
 import QuestionnaireModal from "@/components/QuestionnaireModal";
 import { useEffect, useMemo, useState } from "react";
 import {

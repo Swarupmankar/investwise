@@ -87,31 +87,42 @@ export const reportApi = baseApi.injectEndpoints({
         const items = Array.isArray(res) ? (res as ReportRaw[]) : [];
 
         const parsed: ReportNormalized[] = items.map((r) => {
-          const fileUrl = safeString(r.fileUrl);
-          const fileName = fileNameFromUrl(fileUrl);
-          const fileExt = extFromUrl(fileUrl);
+          // accept either fileUrls[] or legacy fileUrl
+          const rawFileUrls = Array.isArray((r as any).fileUrls)
+            ? ((r as any).fileUrls as (string | null | undefined)[])
+            : r.fileUrl
+            ? [r.fileUrl]
+            : [];
+
+          const files = rawFileUrls
+            .map((u) => String(u || "").trim())
+            .filter(Boolean)
+            .map((url) => {
+              const name = fileNameFromUrl(url);
+              const ext = extFromUrl(url);
+              const isPdf = ext.toLowerCase() === "pdf";
+              const isImage = [
+                "jpg",
+                "jpeg",
+                "png",
+                "gif",
+                "webp",
+                "bmp",
+                "avif",
+              ].includes(ext.toLowerCase());
+              return { url, name, ext, isPdf, isImage };
+            });
 
           // IMPORTANT: keep it a string in Redux
           const createdAt: string = r.createdAt
             ? String(r.createdAt)
             : new Date().toISOString();
 
-          const isPdf = fileExt === "pdf";
-          const isImage = [
-            "jpg",
-            "jpeg",
-            "png",
-            "gif",
-            "webp",
-            "bmp",
-            "avif",
-          ].includes(fileExt);
-
-          // Prefer explicit bannerUrl, else try name (or typo "baner") and resolve
+          // Banner resolution stays the same
           const explicitBannerUrl = safeString((r as any).bannerUrl);
           const bannerName = safeString((r as any).banner ?? (r as any).baner);
           const bannerUrl =
-            explicitBannerUrl || resolveBannerUrl(bannerName, fileUrl);
+            explicitBannerUrl || resolveBannerUrl(bannerName, files[0]?.url);
           const hasBanner = !!bannerUrl;
 
           return {
@@ -123,16 +134,13 @@ export const reportApi = baseApi.injectEndpoints({
             bannerUrl,
             hasBanner,
 
-            fileUrl,
+            files,
+            hasFiles: files.length > 0,
+
             createdAt,
-            fileName,
-            fileExt,
-            isPdf,
-            isImage,
           } as ReportNormalized;
         });
 
-        // sort by createdAt (string → Date only here)
         parsed.sort(
           (a, b) =>
             new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()

@@ -9,7 +9,9 @@ import {
   CheckCircle,
   AlertTriangle,
   Info,
-  Filter,
+  Shield,
+  Wrench,
+  Gift,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
@@ -20,85 +22,69 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { RawNotificationItem } from "@/types/notification/notifications.types";
 
-type UIType = "info" | "warning" | "success" | "transaction";
+// --------------------------------------------------
+// 🟦  FIXED COLOR + ICON MAPPING BASED ON SERVER TYPES
+// --------------------------------------------------
 
-const iconMap: Record<UIType, any> = {
-  info: Info,
-  warning: AlertTriangle,
-  success: CheckCircle,
-  transaction: Bell,
-};
-
-const typeStyle: Record<UIType, any> = {
-  info: {
-    icon: "text-accent-foreground",
-    chip: "bg-accent/40 text-accent-foreground",
-    border: "border-l-2 border-accent",
-    bg: "bg-accent/10",
-    dot: "bg-accent-foreground",
-  },
-  warning: {
-    icon: "text-warning",
-    chip: "bg-warning/15 text-warning",
-    border: "border-l-2 border-warning",
-    bg: "bg-warning/10",
-    dot: "bg-warning",
-  },
-  success: {
-    icon: "text-success",
-    chip: "bg-success/15 text-success",
-    border: "border-l-2 border-success",
-    bg: "bg-success/10",
-    dot: "bg-success",
-  },
-  transaction: {
-    icon: "text-primary",
-    chip: "bg-primary/10 text-primary",
-    border: "border-l-2 border-primary",
-    bg: "bg-primary/5",
-    dot: "bg-primary",
-  },
-};
-
-const labelMap: Record<UIType, string> = {
-  info: "Information",
-  warning: "Action Required",
-  success: "Success",
-  transaction: "Transaction",
-};
-
-/** Map server notification type to UI categories */
-function mapServerTypeToUI(t: string): UIType {
-  switch ((t || "").toUpperCase()) {
-    case "SECURITY":
-    case "ALERT":
-      return "warning";
-    case "PROMOTION":
-      return "success";
-    case "UPDATE":
-    case "MAINTENANCE":
-    default:
-      return "info";
+const serverTypeConfig: Record<
+  string,
+  {
+    icon: any;
+    chip: string;
+    border: string;
+    bg: string;
+    dot: string;
+    badge: string;
   }
-}
+> = {
+  SECURITY: {
+    icon: Shield,
+    chip: "bg-red-100 text-red-700",
+    border: "border-l-2 border-red-500",
+    bg: "bg-red-50",
+    dot: "bg-red-600",
+    badge: "bg-red-50 text-red-700 border border-red-200",
+  },
+  ALERT: {
+    icon: AlertTriangle,
+    chip: "bg-yellow-100 text-yellow-800",
+    border: "border-l-2 border-yellow-500",
+    bg: "bg-yellow-50",
+    dot: "bg-yellow-500",
+    badge: "bg-yellow-50 text-yellow-700 border border-yellow-200",
+  },
+  UPDATE: {
+    icon: Info,
+    chip: "bg-blue-100 text-blue-800",
+    border: "border-l-2 border-blue-500",
+    bg: "bg-blue-50",
+    dot: "bg-blue-500",
+    badge: "bg-blue-50 text-blue-700 border border-blue-200",
+  },
+  PROMOTION: {
+    icon: Gift,
+    chip: "bg-emerald-100 text-emerald-800",
+    border: "border-l-2 border-emerald-500",
+    bg: "bg-emerald-50",
+    dot: "bg-emerald-500",
+    badge: "bg-emerald-50 text-emerald-700 border border-emerald-200",
+  },
+  MAINTENANCE: {
+    icon: Wrench,
+    chip: "bg-purple-100 text-purple-800",
+    border: "border-l-2 border-purple-500",
+    bg: "bg-purple-50",
+    dot: "bg-purple-500",
+    badge: "bg-purple-50 text-purple-700 border border-purple-200",
+  },
+};
 
-/** Optional: map server type to a compact badge style (small text) */
-function serverTypeBadgeClass(serverType: string) {
-  const s = (serverType || "").toUpperCase();
-  switch (s) {
-    case "SECURITY":
-      return "bg-red-50 text-red-700 border border-red-100";
-    case "ALERT":
-      return "bg-yellow-50 text-yellow-700 border border-yellow-100";
-    case "PROMOTION":
-      return "bg-emerald-50 text-emerald-700 border border-emerald-100";
-    case "MAINTENANCE":
-      return "bg-purple-50 text-purple-700 border border-purple-100";
-    case "UPDATE":
-    default:
-      return "bg-slate-50 text-slate-700 border border-slate-100";
-  }
-}
+// fallback for unknown types
+const defaultTypeConfig = serverTypeConfig.UPDATE;
+
+// --------------------------------------------------
+// MAIN COMPONENT
+// --------------------------------------------------
 
 export default function Notifications() {
   const { toast } = useToast();
@@ -115,11 +101,13 @@ export default function Notifications() {
   const [markRead, { isLoading: markLoading }] =
     useMarkNotificationReadMutation();
 
-  // map server notifications to UI-friendly shape, include serverType
+  // Map notifications with consistent color styling
   const notifications = useMemo(() => {
     const items: RawNotificationItem[] = raw?.notifications ?? [];
     return items.map((it) => {
-      const uiType = mapServerTypeToUI(it.notification.type);
+      const serverType = (it.notification.type || "UPDATE").toUpperCase();
+      const style = serverTypeConfig[serverType] || defaultTypeConfig;
+
       return {
         id: String(it.id),
         rawId: it.id,
@@ -130,13 +118,12 @@ export default function Notifications() {
           addSuffix: true,
         }),
         read: Boolean(it.isRead),
-        uiType,
-        serverType: it.notification.type ?? "UPDATE",
+        serverType,
+        style,
       };
     });
   }, [raw]);
 
-  // Use the server-provided unreadCount as the "original" unread badge
   const unreadCount = useMemo(
     () => raw?.unreadCount ?? notifications.filter((n) => !n.read).length,
     [raw, notifications]
@@ -161,14 +148,6 @@ export default function Notifications() {
       document.head.appendChild(meta);
     }
     meta.setAttribute("content", desc);
-
-    let link = document.querySelector('link[rel="canonical"]');
-    if (!link) {
-      link = document.createElement("link");
-      link.setAttribute("rel", "canonical");
-      document.head.appendChild(link);
-    }
-    link.setAttribute("href", window.location.origin + "/notifications");
   }, []);
 
   const handleMarkAsRead = async (rawId: number) => {
@@ -189,7 +168,6 @@ export default function Notifications() {
     }
   };
 
-  // SKELETON card component
   const SkeletonCard = () => (
     <Card className="border-border">
       <CardContent className="p-4 sm:p-5 md:p-6">
@@ -218,7 +196,6 @@ export default function Notifications() {
           </p>
         </div>
 
-        {/* Original unread badge (server-provided count) */}
         <div className="flex items-center space-x-3">
           <Badge className="bg-primary text-primary-foreground">
             {unreadCount} unread
@@ -226,11 +203,10 @@ export default function Notifications() {
         </div>
       </header>
 
-      {/* Filter Tabs */}
+      {/* Filter */}
       <Card className="border-border">
         <CardContent className="p-4 sm:p-5 md:p-6">
           <div className="flex flex-wrap items-center gap-2">
-            <Filter className="h-4 w-4 text-muted-foreground mr-2" />
             <Button
               variant={filter === "all" ? "default" : "ghost"}
               size="sm"
@@ -269,114 +245,82 @@ export default function Notifications() {
           </>
         ) : isError ? (
           <Card className="border-border">
-            <CardContent className="p-8 sm:p-10 md:p-12 text-center">
+            <CardContent className="p-8 text-center">
               <Bell className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-              <h3 className="text-base sm:text-lg font-semibold text-foreground mb-2">
+              <h3 className="text-lg font-semibold mb-2">
                 Unable to load notifications
               </h3>
-              <p className="text-muted-foreground">
-                Something went wrong while fetching notifications. Try
-                refreshing.
-              </p>
-              <div className="mt-4">
-                <Button onClick={() => refetch()}>Retry</Button>
-              </div>
+              <Button onClick={() => refetch()}>Retry</Button>
             </CardContent>
           </Card>
         ) : (
           <>
-            {filteredNotifications.map((notification) => {
-              const Icon = iconMap[notification.uiType];
-              const styles = typeStyle[notification.uiType];
+            {filteredNotifications.map((n) => {
+              const Icon = n.style.icon;
 
               return (
                 <Card
-                  key={notification.id}
-                  className={cn(
-                    "transition-colors duration-200 bg-card border-border",
-                    styles.border
-                  )}
+                  key={n.id}
+                  className={cn("transition-colors bg-card", n.style.border)}
                 >
                   <div
                     className={cn(
-                      "p-4 sm:p-5 md:p-6 rounded-md transition-colors hover:bg-muted/50",
-                      !notification.read && styles.bg
+                      "p-4 sm:p-5 md:p-6 rounded-md",
+                      !n.read && n.style.bg
                     )}
                   >
-                    <div className="flex flex-col sm:flex-row sm:items-start gap-3 sm:gap-4">
-                      <div className="mt-0.5">
-                        <div
-                          className={cn(
-                            "inline-flex h-8 w-8 items-center justify-center rounded-md",
-                            styles.chip
-                          )}
-                        >
-                          <Icon className="h-4 w-4" />
-                        </div>
+                    <div className="flex gap-3 sm:gap-4">
+                      <div
+                        className={cn(
+                          "inline-flex h-8 w-8 items-center justify-center rounded-md",
+                          n.style.chip
+                        )}
+                      >
+                        <Icon className="h-4 w-4" />
                       </div>
 
                       <div className="flex-1 min-w-0">
-                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-2">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <h3 className="text-sm sm:text-base font-semibold text-foreground truncate">
-                              {notification.title}
-                            </h3>
+                        <div className="flex flex-wrap justify-between items-center">
+                          <h3 className="font-semibold text-sm sm:text-base text-foreground">
+                            {n.title}
+                          </h3>
+                          <Badge
+                            className={cn(
+                              "text-xs px-2 py-0.5 rounded",
+                              n.style.badge
+                            )}
+                          >
+                            {n.serverType}
+                          </Badge>
+                        </div>
 
-                            {/* --- SERVER TYPE BADGE (compact) --- */}
-                            <Badge
-                              className={cn(
-                                "text-xs px-2 py-0.5 rounded",
-                                serverTypeBadgeClass(notification.serverType)
-                              )}
-                            >
-                              {notification.serverType}
-                            </Badge>
-                          </div>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {n.message}
+                        </p>
 
-                          <div className="flex items-center space-x-2">
-                            {!notification.read && (
+                        <div className="mt-3 flex justify-between items-center">
+                          <div className="flex items-center space-x-2 text-xs text-muted-foreground">
+                            {!n.read && (
                               <div
                                 className={cn(
-                                  "w-2 h-2 rounded-full flex-shrink-0",
-                                  styles.dot
+                                  "w-2 h-2 rounded-full",
+                                  n.style.dot
                                 )}
                               />
                             )}
-                            <div className="flex items-center space-x-1 text-xs text-muted-foreground">
-                              <Clock className="h-3 w-3" />
-                              <span>{notification.timeAgo}</span>
-                            </div>
+                            <Clock className="h-3 w-3" />
+                            <span>{n.timeAgo}</span>
                           </div>
-                        </div>
 
-                        <p className="mt-1 text-xs sm:text-sm text-muted-foreground leading-relaxed">
-                          {notification.message}
-                        </p>
-
-                        <div className="mt-3 flex items-center justify-between gap-3">
-                          <div>
-                            <Badge
-                              variant="secondary"
-                              className={cn("rounded-full", styles.chip)}
+                          {!n.read && (
+                            <Button
+                              size="sm"
+                              onClick={() => handleMarkAsRead(Number(n.rawId))}
+                              disabled={markLoading}
                             >
-                              {labelMap[notification.uiType]}
-                            </Badge>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            {!notification.read && (
-                              <Button
-                                size="sm"
-                                onClick={() =>
-                                  handleMarkAsRead(Number(notification.rawId))
-                                }
-                                disabled={markLoading}
-                                className="rounded-md"
-                              >
-                                Mark as read
-                              </Button>
-                            )}
-                          </div>
+                              Mark as read
+                            </Button>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -384,22 +328,6 @@ export default function Notifications() {
                 </Card>
               );
             })}
-
-            {filteredNotifications.length === 0 && (
-              <Card className="border-border">
-                <CardContent className="p-8 sm:p-10 md:p-12 text-center">
-                  <Bell className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                  <h3 className="text-base sm:text-lg font-semibold text-foreground mb-2">
-                    No notifications
-                  </h3>
-                  <p className="text-muted-foreground">
-                    {filter === "unread"
-                      ? "You're all caught up! No unread notifications."
-                      : "You don't have any notifications yet."}
-                  </p>
-                </CardContent>
-              </Card>
-            )}
           </>
         )}
       </div>

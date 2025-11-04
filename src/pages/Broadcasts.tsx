@@ -412,18 +412,6 @@ export default function Broadcasts() {
           <div className="space-y-6">
             {posts.map((post, idx) => {
               const isTop = idx === 0;
-
-              const fileUrl = post.fileUrl ?? "";
-              const fileExt = (
-                post.fileExt || extFromUrl(fileUrl)
-              ).toLowerCase();
-              const isFileImage =
-                post.isImage ||
-                ["jpg", "jpeg", "png", "gif", "webp", "bmp", "avif"].includes(
-                  fileExt
-                );
-              const isFilePdf = post.isPdf || fileExt === "pdf";
-
               // Banner URL now comes directly from API/transform
               const bannerUrl = post.bannerUrl;
 
@@ -497,71 +485,70 @@ export default function Broadcasts() {
                     </article>
 
                     {/* FILE SECTION */}
-                    <section aria-label="Report file" className="space-y-3">
+                    <section aria-label="Report files" className="space-y-3">
                       <h3 className="text-sm font-medium text-foreground">
-                        Attachment
+                        Attachments
                       </h3>
 
-                      <div className="flex items-center justify-between gap-3 p-3 rounded border border-border/40 bg-muted/20">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className="h-10 w-10 flex items-center justify-center rounded-md bg-background border">
-                            {iconForType(fileExt)}
-                          </div>
-                          <div className="min-w-0">
-                            <p
-                              className="text-sm font-medium truncate max-w-[320px]"
-                              title={post.fileName}
-                            >
-                              {post.fileName}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              {fileExt ? fileExt.toUpperCase() : "FILE"}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          {isFilePdf && (
-                            <Button
-                              className="hover:shadow-lg"
-                              size="sm"
-                              variant="default"
-                              onClick={() =>
-                                downloadResource(fileUrl, post.fileName)
-                              }
-                            >
-                              <Download className="h-4 w-4 mr-2" />
-                              Download
-                            </Button>
-                          )}
-
-                          {!isFilePdf && (
-                            <>
-                              {isFileImage && (
-                                <Button
-                                  size="sm"
-                                  variant="secondary"
-                                  onClick={() => openViewer(fileUrl)}
-                                >
-                                  <ImageIcon className="h-4 w-4 mr-2" />
-                                  Preview
-                                </Button>
-                              )}
-                              <Button
-                                className="hover:shadow-lg"
-                                size="sm"
-                                variant="default"
-                                onClick={() =>
-                                  downloadResource(fileUrl, post.fileName)
-                                }
+                      {post.hasFiles ? (
+                        <div className="space-y-2">
+                          {post.files.map((f, i) => {
+                            const isFileImage = f.isImage;
+                            const isFilePdf = f.isPdf;
+                            return (
+                              <div
+                                key={`${post.id}-${i}-${f.url}`}
+                                className="flex items-center justify-between gap-3 p-3 rounded border border-border/40 bg-muted/20"
                               >
-                                <Download className="h-4 w-4 mr-2" />
-                                Download
-                              </Button>
-                            </>
-                          )}
+                                <div className="flex items-center gap-3 min-w-0">
+                                  <div className="h-10 w-10 flex items-center justify-center rounded-md bg-background border">
+                                    {iconForType(f.ext)}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p
+                                      className="text-sm font-medium truncate max-w-[320px]"
+                                      title={f.name}
+                                    >
+                                      {f.name}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground">
+                                      {f.ext ? f.ext.toUpperCase() : "FILE"}
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                  {isFileImage && (
+                                    <Button
+                                      size="sm"
+                                      variant="secondary"
+                                      onClick={() => openViewer(f.url)}
+                                    >
+                                      <ImageIcon className="h-4 w-4 mr-2" />
+                                      Preview
+                                    </Button>
+                                  )}
+                                  <Button
+                                    className="hover:shadow-lg"
+                                    size="sm"
+                                    variant="default"
+                                    onClick={() =>
+                                      downloadResource(f.url, f.name)
+                                    }
+                                  >
+                                    <Download className="h-4 w-4 mr-2" />
+                                    Download
+                                  </Button>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
-                      </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">
+                          No attachments.
+                        </p>
+                      )}
                     </section>
                   </CardContent>
                 </Card>
@@ -600,38 +587,57 @@ export default function Broadcasts() {
                   />
 
                   <div className="space-y-2">
-                    <h4 className="text-sm font-medium">Attachment</h4>
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-3">
-                        <div className="h-8 w-8 flex items-center justify-center rounded-md bg-muted">
-                          {iconForType(selectedPost.fileExt)}
-                        </div>
-                        <div>
-                          <p
-                            className="text-sm truncate max-w-[240px]"
-                            title={selectedPost.fileName}
+                    <h4 className="text-sm font-medium">Attachments</h4>
+                    {selectedPost.files.length ? (
+                      <div className="space-y-2">
+                        {selectedPost.files.map((f, i) => (
+                          <div
+                            key={`${selectedPost.id}-${i}-${f.url}`}
+                            className="flex items-center justify-between gap-3"
                           >
-                            {selectedPost.fileName}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {selectedPost.fileExt.toUpperCase()}
-                          </p>
-                        </div>
+                            <div className="flex items-center gap-3">
+                              <div className="h-8 w-8 flex items-center justify-center rounded-md bg-muted">
+                                {iconForType(f.ext)}
+                              </div>
+                              <div>
+                                <p
+                                  className="text-sm truncate max-w-[240px]"
+                                  title={f.name}
+                                >
+                                  {f.name}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  {f.ext ? f.ext.toUpperCase() : "FILE"}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {f.isImage && (
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  onClick={() => openViewer(f.url)}
+                                >
+                                  Preview
+                                </Button>
+                              )}
+                              <Button
+                                size="sm"
+                                variant="default"
+                                onClick={() => downloadResource(f.url, f.name)}
+                              >
+                                <Download className="h-4 w-4 mr-2" />
+                                Download
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() =>
-                          downloadResource(
-                            selectedPost.fileUrl,
-                            selectedPost.fileName
-                          )
-                        }
-                      >
-                        <Download className="h-4 w-4 mr-2" />
-                        Download
-                      </Button>
-                    </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        No attachments.
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -648,7 +654,7 @@ export default function Broadcasts() {
 
       {/* Simple viewer dialog for images / pdf */}
       <Dialog open={viewerOpen} onOpenChange={setViewerOpen}>
-        <DialogContent className="sm:max-w-3xl">
+        <DialogContent className="sm:max-w-3xl [&>button:last-of-type]:hidden">
           {viewerTypeRef.current === "image" && viewerUrl && (
             <img
               src={viewerUrl}

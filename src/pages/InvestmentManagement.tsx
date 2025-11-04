@@ -1,7 +1,5 @@
 // InvestmentManagement.tsx
 import { useParams, useNavigate } from "react-router-dom";
-import { useEffect } from "react";
-import { useInvestmentStore } from "@/hooks/useInvestmentStore";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +14,7 @@ import {
   CheckCircle,
   Wallet,
   CalendarDays,
+  Info,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -79,13 +78,6 @@ const firstOfNextMonth = (d: Date) =>
   new Date(d.getFullYear(), d.getMonth() + 1, 1);
 const lastOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
 
-/**
- * computeMonthlyCycle logic:
- * - If startDate is in the same year & month as "now" => start from the actual startDate,
- *   maturity is the 1st of the next month after that startDate's month.
- * - Otherwise fallback to first of current month -> first of next month.
- * - Returns: { startOfCycle, maturityDate, daysInThisMonth, daysCompleted, daysRemaining, totalDays, progressPct, isFirstOfMonthToday }
- */
 const computeMonthlyCycle = (startDateCandidate?: Date) => {
   const now = new Date();
 
@@ -151,6 +143,7 @@ const computeMonthlyCycle = (startDateCandidate?: Date) => {
     totalDays,
     progressPct: Math.max(0, Math.min(100, progressPct)),
     progressRounded: Math.round(Math.max(0, Math.min(100, progressPct))),
+    // FIX: allow closing on the 1st
     isFirstOfMonthToday: now.getDate() === 1,
   };
 };
@@ -159,9 +152,6 @@ const computeMonthlyCycle = (startDateCandidate?: Date) => {
 export default function InvestmentManagement(): JSX.Element {
   const { id } = useParams();
   const navigate = useNavigate();
-
-  const { investments, closeMatureInvestment, pendingPrincipalWithdrawals } =
-    useInvestmentStore();
 
   const idNumber = normalizeId(id);
   const isIdProvided = id !== undefined;
@@ -175,26 +165,15 @@ export default function InvestmentManagement(): JSX.Element {
     refetch,
   } = useGetInvestmentQuery(idNumber, { skip: !isIdValid });
 
-  // NEW: mutation hook for server-side close
+  // mutation hook for server-side close
   const [closeInvestmentApi, { isLoading: isClosingApi }] =
     useCloseInvestmentMutation();
-
-  const storeRaw = isIdValid
-    ? investments.find((inv) => normalizeId((inv as any).id) === idNumber)
-    : undefined;
 
   const remoteNormalized = remoteInvestmentRaw
     ? normalizeForUI(remoteInvestmentRaw)
     : undefined;
-  const storeNormalized = storeRaw ? normalizeForUI(storeRaw) : undefined;
 
-  const uiInvestment = isIdProvided
-    ? remoteNormalized ?? storeNormalized
-    : undefined;
-
-  useEffect(() => {
-    // no-op; reserved for future side-effects
-  }, [uiInvestment]);
+  const uiInvestment = isIdProvided ? remoteNormalized : undefined;
 
   /** Loading skeleton */
   if (isIdProvided && isIdValid && isLoadingInvestment) {
@@ -306,7 +285,7 @@ export default function InvestmentManagement(): JSX.Element {
   // uiInvestment is defined
   const investment = uiInvestment as ReturnType<typeof normalizeForUI>;
 
-  // --- Monthly cycle logic based on investment.startDate (fix) ---
+  // Monthly cycle logic
   const cycle = computeMonthlyCycle(investment.startDate);
 
   const daysCompleted = cycle.daysCompleted;
@@ -332,8 +311,15 @@ export default function InvestmentManagement(): JSX.Element {
   const getStatusLabel = (status?: string) =>
     normalizeStatus(status).toUpperCase();
 
-  // UPDATED handleClose -> call server API via RTK mutation, keep store fallback
+  const isClosed = normalizeStatus(investment.status) === "closed";
+
+  // Close investment (single-toast, backend message first)
   const handleClose = async () => {
+    if (isClosed) {
+      toast.info("This investment is already closed.");
+      return;
+    }
+
     if (!isFirstOfMonthToday) {
       toast.error("You can close an investment only on the 1st of each month.");
       return;
@@ -345,19 +331,39 @@ export default function InvestmentManagement(): JSX.Element {
       return;
     }
 
+    const toastId = toast.loading("Closing investment...");
+
     try {
-      const resp = await closeInvestmentApi(invIdNum).unwrap();
-      toast.success(
-        "Investment closed successfully. Principal will be available in 15 days."
-      );
+      const res: any = await closeInvestmentApi(invIdNum).unwrap();
+
+      const serverMsg =
+        res?.message ??
+        res?.data?.message ??
+        res?.msg ??
+        res?.statusMessage ??
+        "";
+
+      const processDateRaw = res?.processDate ?? res?.data?.processDate;
+      const etaDays = Number(res?.etaDays ?? res?.data?.etaDays ?? 15) || 15;
+
+      let extraDatePart = "";
       try {
-        closeMatureInvestment(String(invIdNum));
+        if (processDateRaw) {
+          const d = new Date(processDateRaw);
+          if (!Number.isNaN(d.getTime())) {
+            extraDatePart = ` (by ${format(d, "MMM dd, yyyy")})`;
+          }
+        }
       } catch {}
+
+      const fallbackMsg = `Investment closed successfully. Principal will be available in ${etaDays} days${extraDatePart}.`;
+
+      toast.success(serverMsg || fallbackMsg, { id: toastId });
       navigate("/");
     } catch (err: any) {
       const msg =
         err?.data?.message ?? err?.message ?? "Failed to close investment";
-      toast.error(String(msg));
+      toast.error(String(msg), { id: toastId });
     }
   };
 
@@ -479,7 +485,7 @@ export default function InvestmentManagement(): JSX.Element {
 
             <Separator />
 
-            {/* Progress & Timeline (rest unchanged) */}
+            {/* Progress & Timeline */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold">Investment Progress</h3>
@@ -558,7 +564,7 @@ export default function InvestmentManagement(): JSX.Element {
                   </div>
                 </div>
 
-                {isFirstOfMonthToday && (
+                {isFirstOfMonthToday && !isClosed && (
                   <div className="flex items-center gap-2 p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
                     <CheckCircle className="h-5 w-5 text-green-600" />
                     <span className="text-sm font-medium text-green-700">
@@ -604,12 +610,30 @@ export default function InvestmentManagement(): JSX.Element {
                 </div>
               </div>
 
-              {/* Actions — show close only on the 1st */}
+              {/* Actions */}
               <Separator />
               <div className="space-y-4">
                 <h3 className="text-lg font-semibold">Investment Actions</h3>
 
-                {isFirstOfMonthToday ? (
+                {isClosed ? (
+                  <div className="p-4 bg-muted/50 rounded-lg space-y-2 border border-border/40">
+                    <div className="flex items-center gap-2">
+                      <Info className="h-5 w-5 text-foreground" />
+                      <h4 className="font-semibold">
+                        Investment Already Closed
+                      </h4>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      This investment has already been closed
+                      {investment.updatedAt
+                        ? ` (on ${format(
+                            new Date(investment.updatedAt),
+                            "MMM dd, yyyy"
+                          )}).`
+                        : "."}{" "}
+                    </p>
+                  </div>
+                ) : isFirstOfMonthToday ? (
                   <div className="space-y-4">
                     <div className="flex items-center gap-2 p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
                       <CheckCircle className="h-5 w-5 text-green-600" />
@@ -660,59 +684,6 @@ export default function InvestmentManagement(): JSX.Element {
                   </div>
                 )}
               </div>
-
-              {/* Closed status info if applicable */}
-              {(() => {
-                const pp = pendingPrincipalWithdrawals.find((pw) => {
-                  const pwId = normalizeId((pw as any).investmentId);
-                  const invId = normalizeId(investment.id);
-                  return (
-                    pwId !== undefined &&
-                    invId !== undefined &&
-                    pwId === invId &&
-                    pw.status === "pending"
-                  );
-                });
-                if (!pp) return null;
-
-                return (
-                  <>
-                    <Separator />
-                    <div className="space-y-4">
-                      <h3 className="text-lg font-semibold">
-                        Principal Processing
-                      </h3>
-                      <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg space-y-3">
-                        <div className="flex items-center gap-2">
-                          <Clock className="h-5 w-5 text-blue-600" />
-                          <h4 className="font-semibold text-blue-700">
-                            Processing Principal Withdrawal
-                          </h4>
-                        </div>
-                        <div className="space-y-2">
-                          <p className="text-sm text-blue-600">
-                            Amount:{" "}
-                            <strong>${pp.amount.toLocaleString()}</strong>
-                          </p>
-                          <p className="text-sm text-blue-600">
-                            Expected in wallet:{" "}
-                            <strong>
-                              {new Date(pp.processDate).toLocaleDateString(
-                                "en-US",
-                                {
-                                  year: "numeric",
-                                  month: "long",
-                                  day: "numeric",
-                                }
-                              )}
-                            </strong>
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </>
-                );
-              })()}
             </div>
           </div>
         </Card>
