@@ -39,7 +39,7 @@ import { useIsAnsweredQuery } from "@/API/onbording.api";
 
 const normalizeStatus = (raw?: string) => {
   const s = String(raw || "").toLowerCase();
-  if (s === "archived" || s === "archive") return "closed"; // show as CLOSED
+  if (s === "archived" || s === "archive") return "closed";
   return s;
 };
 
@@ -51,6 +51,18 @@ const lastOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
 
 const computeMonthlyCycle = (referenceDate?: string | Date) => {
   const now = new Date();
+
+  // Normalize to midnight to avoid time-of-day drift
+  const startOfToday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate()
+  );
+  const startOfTomorrow = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() + 1
+  );
 
   // default calendar-window: first of this month -> first of next month
   const startOfThisMonth = firstOfMonth(now);
@@ -69,8 +81,6 @@ const computeMonthlyCycle = (referenceDate?: string | Date) => {
     }
   }
 
-  // If parsedStart is in the current month (same year & month as now), use parsedStart -> first of next month after parsedStart
-  // Else (parsedStart is in the past month or missing/invalid), use firstOfThisMonth -> firstOfNextMonth(now)
   let startOfCycle: Date;
   let maturityDate: Date;
 
@@ -88,23 +98,22 @@ const computeMonthlyCycle = (referenceDate?: string | Date) => {
     maturityDate = firstOfNext;
   }
 
-  // compute calendar-day differences (robust against timezone/partial-day issues)
   let daysInThisMonth = lastOfMonth(now).getDate();
 
   // total days in the counted cycle (calendar days)
   let totalDays = differenceInCalendarDays(maturityDate, startOfCycle);
   if (totalDays <= 0) totalDays = 1;
 
-  // days completed from startOfCycle up to today (clamped)
+  // days completed: full days finished up to today (exclude today)
   let daysCompleted = differenceInCalendarDays(
-    now < maturityDate ? now : maturityDate,
+    startOfToday < maturityDate ? startOfToday : maturityDate,
     startOfCycle
   );
   if (daysCompleted < 0) daysCompleted = 0;
   if (daysCompleted > totalDays) daysCompleted = totalDays;
 
-  // days remaining until maturity (clamped)
-  let daysRemaining = differenceInCalendarDays(maturityDate, now);
+  // days remaining: from tomorrow to maturity (exclude today)
+  let daysRemaining = differenceInCalendarDays(maturityDate, startOfTomorrow);
   if (daysRemaining < 0) daysRemaining = 0;
 
   const progressPct = (daysCompleted / totalDays) * 100;
@@ -128,6 +137,18 @@ const computeMonthlyCycle = (referenceDate?: string | Date) => {
  */
 const computeReferralThreeMonthCycle = (referenceDate?: string | Date) => {
   const now = new Date();
+
+  // Normalize to midnight to avoid time-of-day drift
+  const startOfToday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate()
+  );
+  const startOfTomorrow = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() + 1
+  );
 
   let startOfCycle: Date;
   if (referenceDate) {
@@ -156,14 +177,16 @@ const computeReferralThreeMonthCycle = (referenceDate?: string | Date) => {
   let totalDays = differenceInCalendarDays(maturityDate, startOfCycle);
   if (totalDays <= 0) totalDays = 1;
 
+  // days completed: full days finished up to today (exclude today)
   let daysCompleted = differenceInCalendarDays(
-    now < maturityDate ? now : maturityDate,
+    startOfToday < maturityDate ? startOfToday : maturityDate,
     startOfCycle
   );
   if (daysCompleted < 0) daysCompleted = 0;
   if (daysCompleted > totalDays) daysCompleted = totalDays;
 
-  let daysRemaining = differenceInCalendarDays(maturityDate, now);
+  // days remaining: from tomorrow to maturity (exclude today)
+  let daysRemaining = differenceInCalendarDays(maturityDate, startOfTomorrow);
   if (daysRemaining < 0) daysRemaining = 0;
 
   const progressPct = (daysCompleted / totalDays) * 100;
@@ -187,7 +210,6 @@ const parseNumber = (v: unknown): number | undefined => {
     return Number.isFinite(v) ? v : undefined;
   }
   if (typeof v === "string") {
-    // remove commas, currency symbols, whitespace
     const cleaned = v.replace(/[^\d.-]/g, "");
     const n = Number(cleaned);
     return Number.isFinite(n) ? n : undefined;
@@ -195,12 +217,10 @@ const parseNumber = (v: unknown): number | undefined => {
   return undefined;
 };
 
-// small helper for robust amount parsing (extra fallback)
 const parseAmountRobust = (v: unknown): number => {
   const p = parseNumber(v);
   if (typeof p === "number") return p;
   try {
-    // extra fallback: stringify, remove non-digits, parse
     const s = String(v ?? "");
     const cleaned = s.replace(/[^\d.-]/g, "");
     const n = Number(cleaned);
@@ -214,7 +234,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
 
   // NO-BLINK QUESTIONNAIRE:
-  const stored = localStorage.getItem("questionnaireCompleted"); // "true" | "false" | null
+  const stored = localStorage.getItem("questionnaireCompleted");
   const [showQuestionnaireModal, setShowQuestionnaireModal] = useState<boolean>(
     stored === "false"
   );
@@ -340,8 +360,8 @@ export default function Dashboard() {
     const s = normalizeStatus(status);
     const variants: Record<string, string> = {
       active: "bg-success/10 text-success border-success/20",
-      closed: "bg-red-100 text-red-700 border-red-300", // RED for archived → closed
-      paused: "bg-yellow-100 text-yellow-700 border-yellow-300", // YELLOW for paused
+      closed: "bg-red-100 text-red-700 border-red-300",
+      paused: "bg-yellow-100 text-yellow-700 border-yellow-300",
       mature: "bg-purple-500/10 text-purple-600 border-purple-500/20",
       completed: "bg-muted text-muted-foreground border-border",
       pending: "bg-warning/10 text-warning border-warning/20",
@@ -351,7 +371,7 @@ export default function Dashboard() {
 
   const getStatusLabel = (status?: string) => {
     const s = normalizeStatus(status);
-    return s.toUpperCase(); // CLOSED / PAUSED / ACTIVE...
+    return s.toUpperCase();
   };
 
   const dashboardStats = useMemo(
@@ -509,7 +529,6 @@ export default function Dashboard() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
           {investmentsLoading && investments.length === 0 ? (
-            // loading skeleton cards
             Array.from({ length: Math.min(3, investmentsPerPage) }).map(
               (_, i) => (
                 <div
@@ -529,37 +548,28 @@ export default function Dashboard() {
             </div>
           ) : (
             paginatedInvestments.map((investment: any) => {
-              // Choose correct cycle:
-              // use normalized field coming from API transforms:
               const isReferralThreeMonths =
                 String(investment?.referralInvestmentType) ===
                 "ReferralThreeMonths";
 
-              // Prefer createdAt for 3-month plan (start = creation date).
               const cycle = isReferralThreeMonths
                 ? computeReferralThreeMonthCycle(
                     investment.createdAt || investment.startDate
                   )
                 : computeMonthlyCycle(investment.startDate);
 
-              // ---------------------------
-              // IMPORTANT: ROI stays hardcoded at 5% per your request
+              // ROI hardcoded to 5%
               const roiResolved = 5;
 
-              // parse amount robustly
               const amountParsed = parseAmountRobust(investment.amount);
-
-              // monthly return = amount * 5%
               const monthlyReturn = (amountParsed * roiResolved) / 100;
 
-              // days in current calendar month (from cycle)
+              // days in current calendar month
               const daysInThisMonth = cycle.daysInThisMonth || 30;
 
-              // daily return = monthlyReturn / daysInThisMonth
               const dailyReturn =
                 daysInThisMonth > 0 ? monthlyReturn / daysInThisMonth : 0;
 
-              // format to two decimals (and use locale formatting)
               const monthlyReturnFormatted = Number(
                 monthlyReturn
               ).toLocaleString(undefined, {
@@ -570,7 +580,31 @@ export default function Dashboard() {
                 undefined,
                 { minimumFractionDigits: 2, maximumFractionDigits: 2 }
               );
-              // ---------------------------
+
+              // === NEW: for estimate, always use remaining days of THIS calendar month for 3-month plans
+              const now = new Date();
+              const startOfTomorrow = new Date(
+                now.getFullYear(),
+                now.getMonth(),
+                now.getDate() + 1
+              );
+              const firstOfNext = firstOfNextMonth(now);
+              const daysRemainingThisMonth = Math.max(
+                0,
+                differenceInCalendarDays(firstOfNext, startOfTomorrow)
+              );
+
+              const daysRemainingForEstimate = isReferralThreeMonths
+                ? daysRemainingThisMonth // 3-month plan → only rest of current month
+                : cycle.daysRemaining || 0; // 1-month plan → already month-scoped
+
+              const estimatedRemaining = dailyReturn * daysRemainingForEstimate;
+              const estimatedRemainingFormatted = Number(
+                estimatedRemaining
+              ).toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              });
 
               return (
                 <div
@@ -605,7 +639,6 @@ export default function Dashboard() {
                         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                           ROI
                         </p>
-                        {/* KEEP +5% hardcoded */}
                         <p className="text-xl font-bold text-success">+5%</p>
                         <p className="text-xs text-muted-foreground">Monthly</p>
                       </div>
@@ -648,7 +681,7 @@ export default function Dashboard() {
                           </p>
 
                           <p className="text-xs text-muted-foreground">
-                            {`~ $${monthlyReturnFormatted} / month`}
+                            {`~ $${estimatedRemainingFormatted}`} / mon
                           </p>
                         </div>
 

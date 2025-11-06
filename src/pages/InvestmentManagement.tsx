@@ -89,6 +89,18 @@ const lastOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
 const computeMonthlyCycle = (startDateCandidate?: Date) => {
   const now = new Date();
 
+  // Normalize to date-only
+  const startOfToday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate()
+  );
+  const startOfTomorrow = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() + 1
+  );
+
   const startOfThisMonth = firstOfMonth(now);
   const firstOfNext = firstOfNextMonth(now);
 
@@ -125,16 +137,16 @@ const computeMonthlyCycle = (startDateCandidate?: Date) => {
   let totalDays = differenceInCalendarDays(maturityDate, startOfCycle);
   if (totalDays <= 0) totalDays = 1;
 
-  // days completed from startOfCycle up to today (clamped)
+  // days completed: full days finished up to today (exclude today)
   let daysCompleted = differenceInCalendarDays(
-    now < maturityDate ? now : maturityDate,
+    startOfToday < maturityDate ? startOfToday : maturityDate,
     startOfCycle
   );
   if (daysCompleted < 0) daysCompleted = 0;
   if (daysCompleted > totalDays) daysCompleted = totalDays;
 
-  // days remaining until maturity (clamped)
-  let daysRemaining = differenceInCalendarDays(maturityDate, now);
+  // days remaining: from tomorrow to maturity (exclude today)
+  let daysRemaining = differenceInCalendarDays(maturityDate, startOfTomorrow);
   if (daysRemaining < 0) daysRemaining = 0;
 
   // days in calendar month for display (use the current month length)
@@ -151,17 +163,25 @@ const computeMonthlyCycle = (startDateCandidate?: Date) => {
     totalDays,
     progressPct: Math.max(0, Math.min(100, progressPct)),
     progressRounded: Math.round(Math.max(0, Math.min(100, progressPct))),
-    isFirstOfMonthToday: now.getDate() === 1,
+
+    // close button date
+    isFirstOfMonthToday: now.getDate() === 7,
   };
 };
 
-/** 3-month referral cycle:
- *  - start = creation date
- *  - maturity = 1st of the month three months after creation month
- *    (e.g., created Nov 4 ⇒ Feb 1; created Nov 29 ⇒ Feb 1)
- */
 const computeReferralThreeMonthCycle = (startDateCandidate?: Date) => {
   const now = new Date();
+
+  const startOfToday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate()
+  );
+  const startOfTomorrow = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() + 1
+  );
 
   let startOfCycle: Date;
   if (
@@ -177,7 +197,6 @@ const computeReferralThreeMonthCycle = (startDateCandidate?: Date) => {
     startOfCycle = now;
   }
 
-  // Maturity: 1st of the month three months after creation month
   const maturityDate = new Date(
     startOfCycle.getFullYear(),
     startOfCycle.getMonth() + 3,
@@ -187,14 +206,16 @@ const computeReferralThreeMonthCycle = (startDateCandidate?: Date) => {
   let totalDays = differenceInCalendarDays(maturityDate, startOfCycle);
   if (totalDays <= 0) totalDays = 1;
 
+  // days completed: full days finished up to today (exclude today)
   let daysCompleted = differenceInCalendarDays(
-    now < maturityDate ? now : maturityDate,
+    startOfToday < maturityDate ? startOfToday : maturityDate,
     startOfCycle
   );
   if (daysCompleted < 0) daysCompleted = 0;
   if (daysCompleted > totalDays) daysCompleted = totalDays;
 
-  let daysRemaining = differenceInCalendarDays(maturityDate, now);
+  // days remaining: from tomorrow to maturity (exclude today)
+  let daysRemaining = differenceInCalendarDays(maturityDate, startOfTomorrow);
   if (daysRemaining < 0) daysRemaining = 0;
 
   const progressPct = (daysCompleted / totalDays) * 100;
@@ -208,8 +229,8 @@ const computeReferralThreeMonthCycle = (startDateCandidate?: Date) => {
     totalDays,
     progressPct: Math.max(0, Math.min(100, progressPct)),
     progressRounded: Math.round(Math.max(0, Math.min(100, progressPct))),
-    // isFirstOfMonthToday: now.getDate() === 4,
-    isFirstOfMonthToday: [4, 5].includes(now.getDate()),
+    isFirstOfMonthToday: now.getDate() === 1,
+    // isFirstOfMonthToday: [4, 5].includes(now.getDate()),
   };
 };
 /** Component **/
@@ -503,9 +524,6 @@ export default function InvestmentManagement(): JSX.Element {
                     {investment.name}
                   </h3>
                 </div>
-                <p className="text-sm text-muted-foreground font-medium">
-                  Investment ID: {investment.id}
-                </p>
               </div>
             </div>
 
