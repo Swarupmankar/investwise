@@ -466,17 +466,6 @@ export default function Referrals() {
               Retry
             </Button>
           )}
-          <Button
-            variant="default"
-            className="px-6 py-2.5 text-base font-medium"
-            onClick={() => referralLink && copyToClipboard(referralLink)}
-            disabled={
-              !referralLink || referralLink === "Failed to load referral code"
-            }
-          >
-            <Share2 className="h-4 w-4 mr-2" />
-            Share Link
-          </Button>
         </div>
       </div>
 
@@ -661,15 +650,14 @@ export default function Referrals() {
                 <Handshake className="h-5 w-5 text-primary" />
               </div>
               <div>
-                <CardTitle className="text-lg">Your Referral Link</CardTitle>
+                <CardTitle className="text-lg">Your Referral Code</CardTitle>
                 <p className="text-muted-foreground text-sm">
-                  Share this link to start earning commissions
+                  Share this code to start earning commissions
                 </p>
               </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* ✅ NEW Referral Code Field */}
             {statsData?.referral?.code && (
               <div className="flex gap-3">
                 <div className="flex-1 p-3 bg-muted/30 rounded-lg border border-border">

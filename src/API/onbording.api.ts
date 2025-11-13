@@ -1,3 +1,4 @@
+// onboarding.api.ts
 import { baseApi } from "./baseApi";
 import { ENDPOINTS } from "@/constants/apiEndpoints";
 import {
@@ -16,7 +17,35 @@ export const onboardingApi = baseApi.injectEndpoints({
         method: "POST",
         data: body,
       }),
-      invalidatesTags: [{ type: "Onboarding" as const, id: "QUESTIONS" }],
+      // invalidate both the QUESTIONS and STATUS tags so isAnswered is re-fetched
+      invalidatesTags: [
+        { type: "Onboarding" as const, id: "QUESTIONS" },
+        { type: "Onboarding" as const, id: "STATUS" },
+      ],
+
+      // optimistic local update: mark questionnaire completed immediately
+      async onQueryStarted(_arg, { dispatch, queryFulfilled }) {
+        try {
+          // Optimistically mark localStorage as completed.
+          // IMPORTANT: Cross-user apps should scope this key by user id.
+          try {
+            localStorage.setItem("questionnaireCompleted", "true");
+          } catch {
+            // ignore localStorage errors (e.g., private mode)
+          }
+
+          // Wait for server confirmation
+          await queryFulfilled;
+          // successful: invalidatesTags will trigger refetch of isAnswered
+        } catch {
+          // mutation failed — rollback optimistic local flag
+          try {
+            localStorage.setItem("questionnaireCompleted", "false");
+          } catch {
+            // ignore
+          }
+        }
+      },
     }),
 
     // GET USER ANSWERS

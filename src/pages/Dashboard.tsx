@@ -1,3 +1,4 @@
+// dashboard.tsx
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -35,7 +36,10 @@ import {
   useGetAllInvestmentsQuery,
   useGetInvestmentPortfolioQuery,
 } from "@/API/investmentApi";
-import { useIsAnsweredQuery } from "@/API/onbording.api";
+import {
+  useIsAnsweredQuery,
+  useSaveAnswersMutation,
+} from "@/API/onbording.api";
 
 const normalizeStatus = (raw?: string) => {
   const s = String(raw || "").toLowerCase();
@@ -233,22 +237,132 @@ const parseAmountRobust = (v: unknown): number => {
 export default function Dashboard() {
   const navigate = useNavigate();
 
-  // NO-BLINK QUESTIONNAIRE:
-  const stored = localStorage.getItem("questionnaireCompleted");
-  const [showQuestionnaireModal, setShowQuestionnaireModal] = useState<boolean>(
-    stored === "false"
-  );
-  const [needsServerDecision, setNeedsServerDecision] = useState<boolean>(
-    stored === null
+  // ---------- Questionnaire / No-blink logic (robust) ----------------------
+  const LOCAL_KEY_BASE = "questionnaireCompleted";
+  const buildLocalKey = (userId?: string | number) =>
+    userId ? `${LOCAL_KEY_BASE}:user_${userId}` : LOCAL_KEY_BASE;
+  const userSpecificLocalKey = buildLocalKey(undefined);
+
+  const [localStored, setLocalStored] = useState<string | null>(() => {
+    try {
+      return typeof window !== "undefined"
+        ? localStorage.getItem(userSpecificLocalKey)
+        : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [showQuestionnaireModal, setShowQuestionnaireModal] =
+    useState<boolean>(false);
+  const [isDeciding, setIsDeciding] = useState<boolean>(
+    () => localStored === null
   );
 
-  // pagination
+  const {
+    data: isAnsweredData,
+    isLoading: isAnsweredLoading,
+    refetch: refetchIsAnswered,
+    isFetching: isAnsweredFetching,
+  } = useIsAnsweredQuery(undefined, { refetchOnMountOrArgChange: true });
+
+  const [saveAnswersMutation] = useSaveAnswersMutation();
+  const SAFE_TIMEOUT_MS = 4000;
+
+  useEffect(() => {
+    if (!isDeciding) return;
+
+    if (localStored === "false") {
+      setShowQuestionnaireModal(true);
+      setIsDeciding(false);
+      return;
+    }
+    if (localStored === "true") {
+      setShowQuestionnaireModal(false);
+      setIsDeciding(false);
+      return;
+    }
+
+    let didFallback = false;
+    const timeout = window.setTimeout(() => {
+      try {
+        localStorage.setItem(userSpecificLocalKey, "true");
+      } catch {
+        // ignore
+      }
+      setLocalStored("true");
+      setShowQuestionnaireModal(false);
+      setIsDeciding(false);
+      didFallback = true;
+    }, SAFE_TIMEOUT_MS);
+
+    if (!isAnsweredLoading && isAnsweredData !== undefined && !didFallback) {
+      const allAnswered = Boolean(isAnsweredData?.allAnswered);
+      try {
+        localStorage.setItem(
+          userSpecificLocalKey,
+          allAnswered ? "true" : "false"
+        );
+      } catch {
+        // ignore
+      }
+      setLocalStored(allAnswered ? "true" : "false");
+      setShowQuestionnaireModal(allAnswered === false);
+      setIsDeciding(false);
+      clearTimeout(timeout);
+    }
+
+    return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDeciding, localStored, isAnsweredLoading, isAnsweredData]);
+
+  useEffect(() => {
+    if (isAnsweredLoading) return;
+    if (isAnsweredData === undefined) return;
+
+    const allAnswered = Boolean(isAnsweredData?.allAnswered);
+    try {
+      localStorage.setItem(
+        userSpecificLocalKey,
+        allAnswered ? "true" : "false"
+      );
+    } catch {
+      // ignore
+    }
+    setLocalStored(allAnswered ? "true" : "false");
+    setShowQuestionnaireModal(allAnswered === false);
+    setIsDeciding(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAnsweredLoading, isAnsweredData]);
+
+  const handleQuestionnaireComplete = async (answers?: any) => {
+    try {
+      localStorage.setItem(userSpecificLocalKey, "true");
+    } catch {
+      // ignore
+    }
+    setLocalStored("true");
+    setShowQuestionnaireModal(false);
+
+    try {
+      if (answers) {
+        await saveAnswersMutation(answers).unwrap();
+      }
+      await refetchIsAnswered();
+    } catch {
+      try {
+        localStorage.setItem(userSpecificLocalKey, "false");
+      } catch {
+        // ignore
+      }
+      setLocalStored("false");
+      setShowQuestionnaireModal(true);
+    }
+  };
+
+  // -------------------- rest of Dashboard state & data ---------------------
   const [currentPage, setCurrentPage] = useState(1);
   const [investmentsPerPage, setInvestmentsPerPage] = useState(6);
-
-  // API hooks
-  const { data: isAnsweredData, isLoading: isAnsweredLoading } =
-    useIsAnsweredQuery();
 
   const {
     data: portfolio,
@@ -265,7 +379,6 @@ export default function Dashboard() {
     refetch: refetchInvestments,
   } = useGetAllInvestmentsQuery();
 
-  // local state for displayed user
   const [displayedUser, setDisplayedUser] = useState(() => ({
     walletBalance: 0,
     investmentWallet: 0,
@@ -295,32 +408,6 @@ export default function Dashboard() {
       }));
     }
   }, [portfolio]);
-
-  // Decide questionnaire visibility without blink
-  useEffect(() => {
-    if (!needsServerDecision) return;
-    if (isAnsweredLoading) return;
-
-    if (isAnsweredData?.allAnswered === true) {
-      localStorage.setItem("questionnaireCompleted", "true");
-      setShowQuestionnaireModal(false);
-      setNeedsServerDecision(false);
-      return;
-    }
-    if (isAnsweredData?.allAnswered === false) {
-      localStorage.setItem("questionnaireCompleted", "false");
-      setShowQuestionnaireModal(true);
-      setNeedsServerDecision(false);
-      return;
-    }
-
-    setNeedsServerDecision(false);
-  }, [needsServerDecision, isAnsweredLoading, isAnsweredData]);
-
-  const handleQuestionnaireComplete = () => {
-    localStorage.setItem("questionnaireCompleted", "true");
-    setShowQuestionnaireModal(false);
-  };
 
   const [investments, setInvestments] = useState<any[]>([]);
 
@@ -355,7 +442,6 @@ export default function Dashboard() {
   const formatCurrency = (n?: number) =>
     Number.isFinite(n ?? NaN) ? (n as number).toLocaleString() : "0";
 
-  // Status badge — includes PAUSED and ARCHIVE with readable colors
   const getStatusBadge = (status?: string) => {
     const s = normalizeStatus(status);
     const variants: Record<string, string> = {
@@ -418,13 +504,26 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8">
-      {/* Questionnaire Modal */}
-      <QuestionnaireModal
-        isOpen={showQuestionnaireModal}
-        onComplete={handleQuestionnaireComplete}
-      />
+      {/* Loader overlay while deciding — prevents flash/flicker */}
+      {isDeciding && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-background/40 backdrop-blur-sm">
+          <div className="rounded-lg p-4 bg-card/90 shadow-lg flex items-center gap-3">
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-t-transparent" />
+            <span className="text-sm text-muted-foreground">
+              Checking onboarding…
+            </span>
+          </div>
+        </div>
+      )}
 
-      {/* Alert Banner */}
+      {/* Questionnaire Modal — render only after a decision is made and it's needed */}
+      {!isDeciding && (
+        <QuestionnaireModal
+          isOpen={showQuestionnaireModal}
+          onComplete={(answers?: any) => handleQuestionnaireComplete(answers)}
+        />
+      )}
+
       <NotificationBanner />
 
       {/* Header */}
@@ -448,7 +547,7 @@ export default function Dashboard() {
         </Button>
       </div>
 
-      {/* Modern Dashboard Summary Cards */}
+      {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {dashboardStats.map((stat) => (
           <div
@@ -492,7 +591,7 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* Investment Plans Section */}
+      {/* Investments */}
       <div className="space-y-6">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div className="space-y-1">
@@ -562,45 +661,72 @@ export default function Dashboard() {
               const roiResolved = 5;
 
               const amountParsed = parseAmountRobust(investment.amount);
-              const monthlyReturn = (amountParsed * roiResolved) / 100;
+              const fullMonthlyReturn = (amountParsed * roiResolved) / 100; // full month return
 
               // days in current calendar month
               const daysInThisMonth = cycle.daysInThisMonth || 30;
 
+              // daily return (for showing "Next Return" as daily figure)
               const dailyReturn =
-                daysInThisMonth > 0 ? monthlyReturn / daysInThisMonth : 0;
+                daysInThisMonth > 0 ? fullMonthlyReturn / daysInThisMonth : 0;
 
-              const monthlyReturnFormatted = Number(
-                monthlyReturn
+              const fullMonthlyReturnFormatted = Number(
+                fullMonthlyReturn
               ).toLocaleString(undefined, {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2,
               });
               const dailyReturnFormatted = Number(dailyReturn).toLocaleString(
                 undefined,
-                { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+                {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                }
               );
 
-              // === NEW: for estimate, always use remaining days of THIS calendar month for 3-month plans
-              const now = new Date();
-              const startOfTomorrow = new Date(
-                now.getFullYear(),
-                now.getMonth(),
-                now.getDate() + 1
-              );
-              const firstOfNext = firstOfNextMonth(now);
-              const daysRemainingThisMonth = Math.max(
-                0,
-                differenceInCalendarDays(firstOfNext, startOfTomorrow)
-              );
+              // ---- FIX: compute prorated amount for creation month only ----
+              let monthlyEstimateAmount = fullMonthlyReturn; // default: full month
 
-              const daysRemainingForEstimate = isReferralThreeMonths
-                ? daysRemainingThisMonth // 3-month plan → only rest of current month
-                : cycle.daysRemaining || 0; // 1-month plan → already month-scoped
+              try {
+                const created = new Date(
+                  investment.createdAt || investment.startDate || null
+                );
+                const now = new Date();
 
-              const estimatedRemaining = dailyReturn * daysRemainingForEstimate;
-              const estimatedRemainingFormatted = Number(
-                estimatedRemaining
+                // only prorate if created date is valid and is in the current calendar month/year
+                if (
+                  !Number.isNaN(created.getTime()) &&
+                  created.getFullYear() === now.getFullYear() &&
+                  created.getMonth() === now.getMonth()
+                ) {
+                  // days remaining in the calendar month starting from creation date (creation-day inclusive)
+                  // compute days between first of next month and creation date
+                  const firstOfNext = firstOfNextMonth(created);
+                  const creationDayStart = new Date(
+                    created.getFullYear(),
+                    created.getMonth(),
+                    created.getDate()
+                  );
+                  let daysRemainingFromCreation = differenceInCalendarDays(
+                    firstOfNext,
+                    creationDayStart
+                  );
+                  if (daysRemainingFromCreation < 0)
+                    daysRemainingFromCreation = 0;
+                  // prorate by daysRemainingFromCreation / daysInThisMonth
+                  monthlyEstimateAmount =
+                    (fullMonthlyReturn * daysRemainingFromCreation) /
+                    daysInThisMonth;
+                } else {
+                  // not created this month => show full month return (monthlyEstimateAmount already set)
+                }
+              } catch {
+                // Fallback: keep full monthly amount
+                monthlyEstimateAmount = fullMonthlyReturn;
+              }
+
+              const monthlyEstimateFormatted = Number(
+                monthlyEstimateAmount
               ).toLocaleString(undefined, {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2,
@@ -680,9 +806,8 @@ export default function Dashboard() {
                             ${dailyReturnFormatted}
                           </p>
 
-                          <p className="text-xs text-muted-foreground">
-                            {`~ $${estimatedRemainingFormatted}`} / mon
-                          </p>
+                          {/* show prorated monthly earning for creation month, otherwise full month */}
+                          <p className="text-xs text-muted-foreground">{`~ $${monthlyEstimateFormatted} / month`}</p>
                         </div>
 
                         <div className="text-center space-y-2">
@@ -804,9 +929,6 @@ export default function Dashboard() {
           </div>
         )}
       </div>
-
-      {/* Monthly Returns Section */}
-      {/* <MonthlyReturns /> */}
     </div>
   );
 }

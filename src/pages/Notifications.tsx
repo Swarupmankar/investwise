@@ -35,6 +35,7 @@ const serverTypeConfig: Record<
     bg: string;
     dot: string;
     badge: string;
+    label: string;
   }
 > = {
   SECURITY: {
@@ -44,6 +45,7 @@ const serverTypeConfig: Record<
     bg: "bg-red-50",
     dot: "bg-red-600",
     badge: "bg-red-50 text-red-700 border border-red-200",
+    label: "SECURITY",
   },
   ALERT: {
     icon: AlertTriangle,
@@ -52,6 +54,7 @@ const serverTypeConfig: Record<
     bg: "bg-yellow-50",
     dot: "bg-yellow-500",
     badge: "bg-yellow-50 text-yellow-700 border border-yellow-200",
+    label: "ALERT",
   },
   UPDATE: {
     icon: Info,
@@ -60,6 +63,7 @@ const serverTypeConfig: Record<
     bg: "bg-blue-50",
     dot: "bg-blue-500",
     badge: "bg-blue-50 text-blue-700 border border-blue-200",
+    label: "UPDATE",
   },
   PROMOTION: {
     icon: Gift,
@@ -68,6 +72,7 @@ const serverTypeConfig: Record<
     bg: "bg-emerald-50",
     dot: "bg-emerald-500",
     badge: "bg-emerald-50 text-emerald-700 border border-emerald-200",
+    label: "SUCCESS",
   },
   MAINTENANCE: {
     icon: Wrench,
@@ -76,11 +81,15 @@ const serverTypeConfig: Record<
     bg: "bg-purple-50",
     dot: "bg-purple-500",
     badge: "bg-purple-50 text-purple-700 border border-purple-200",
+    label: "MAINTENANCE",
   },
 };
 
 // fallback for unknown types
-const defaultTypeConfig = serverTypeConfig.UPDATE;
+const defaultTypeConfig = {
+  ...serverTypeConfig.UPDATE,
+  label: "UPDATE",
+};
 
 // --------------------------------------------------
 // MAIN COMPONENT
@@ -120,6 +129,7 @@ export default function Notifications() {
         read: Boolean(it.isRead),
         serverType,
         style,
+        label: style.label || serverType,
       };
     });
   }, [raw]);
@@ -290,7 +300,7 @@ export default function Notifications() {
                               n.style.badge
                             )}
                           >
-                            {n.serverType}
+                            {n.label}
                           </Badge>
                         </div>
 

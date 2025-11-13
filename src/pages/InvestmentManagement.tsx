@@ -165,7 +165,7 @@ const computeMonthlyCycle = (startDateCandidate?: Date) => {
     progressRounded: Math.round(Math.max(0, Math.min(100, progressPct))),
 
     // close button date
-    isFirstOfMonthToday: now.getDate() === 7,
+    isFirstOfMonthToday: now.getDate() === 14,
   };
 };
 
