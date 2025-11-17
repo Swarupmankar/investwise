@@ -17,9 +17,34 @@ export const transactionsApi = baseApi.injectEndpoints({
       }),
       providesTags: (_res) => [{ type: "Transactions" as const, id: "LIST" }],
       transformResponse: (res: unknown) => {
-        return (res ?? {}) as GetTransactionsResponse;
+        const raw = (res ?? {}) as any;
+
+        // Normalize deposits
+        const deposits = Array.isArray(raw.deposits) ? raw.deposits : [];
+
+        // Normalize withdrawals (accept both correct and typo spelling)
+        const withdrawals = Array.isArray(raw.withdrawals)
+          ? raw.withdrawals
+          : Array.isArray(raw.withdrawls)
+          ? raw.withdrawls
+          : [];
+
+        // Normalize investment settlements if present
+        const investmentSettlements = Array.isArray(raw.investmentSettlements)
+          ? raw.investmentSettlements
+          : [];
+
+        const normalized: GetTransactionsResponse = {
+          ...raw,
+          deposits,
+          withdrawals,
+          investmentSettlements,
+        };
+
+        return normalized;
       },
     }),
+
     // CREATE-TRANSACTION
     createDepositTransaction: build.mutation<DepositResponse, FormData>({
       query: (formData) => ({

@@ -1,3 +1,4 @@
+// src/components/TransactionHistory.tsx
 import { useMemo, useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -35,6 +36,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useGetTransactionsQuery } from "@/API/transactions.api";
 import { Skeleton } from "@/components/ui/skeleton";
+import type { GetTransactionsResponse } from "@/types/transctions/transactions.types";
 
 /** UI helpers */
 const getTypeIcon = (type: string) => {
@@ -179,6 +181,7 @@ type ServerDeposit = {
   amount: string;
   txId: string | null;
   proofUrl?: string | null;
+  depositWallet?: string | null;
   status: string;
   createdAt: string;
   updatedAt?: string;
@@ -198,9 +201,19 @@ type ServerWithdraw = {
   updatedAt?: string;
 };
 
+type ServerSettlement = {
+  id: number;
+  userId: number;
+  investmemtId?: number | null;
+  amount: string;
+  status: string;
+  createdAt: string;
+  updatedAt?: string;
+};
+
 type UnifiedTx = {
   id: string;
-  kind: "deposit" | "withdrawal";
+  kind: "deposit" | "withdrawal" | "return";
   amount: number;
   txRef: string;
   proofUrl?: string | null;
@@ -213,7 +226,7 @@ type UnifiedTx = {
 export default function TransactionHistory() {
   const [searchTerm, setSearchTerm] = useState("");
   const [typeFilter, setTypeFilter] = useState<
-    "all" | "deposit" | "withdrawal"
+    "all" | "deposit" | "withdrawal" | "return"
   >("all");
   const [statusFilter, setStatusFilter] = useState<
     "all" | "pending" | "approved" | "rejected"
@@ -232,18 +245,27 @@ export default function TransactionHistory() {
     refetch,
   } = useGetTransactionsQuery();
 
-  // Normalize deposits + withdrawals into a single list, include source field
+  // Ensure we have a typed, normalized response to read from
+  const safeResp = (resp ?? {}) as GetTransactionsResponse;
+
+  // Normalize deposits + withdrawals + settlements into a single list
   const unified = useMemo<UnifiedTx[]>(() => {
-    const deposits: ServerDeposit[] = Array.isArray(resp?.deposits)
-      ? resp!.deposits
+    const deposits: ServerDeposit[] = Array.isArray(safeResp.deposits)
+      ? safeResp.deposits
       : [];
 
     // Handle both spellings for backward compatibility
-    const withdrawals: ServerWithdraw[] = Array.isArray(
-      (resp as any)?.withdrawals || // Try correct spelling first
-        (resp as any)?.withdrawls // Fallback to typo spelling
+    const withdrawals: ServerWithdraw[] = Array.isArray(safeResp.withdrawals)
+      ? safeResp.withdrawals
+      : Array.isArray((safeResp as any).withdrawls)
+      ? (safeResp as any).withdrawls
+      : [];
+
+    // investmentSettlements may be present
+    const settlements: ServerSettlement[] = Array.isArray(
+      safeResp.investmentSettlements
     )
-      ? (resp as any)?.withdrawals || (resp as any)?.withdrawls
+      ? safeResp.investmentSettlements
       : [];
 
     // helper to map withdrawFrom -> human label
@@ -285,14 +307,30 @@ export default function TransactionHistory() {
       };
     });
 
-    const combined = [...mappedDeposits, ...mappedWithdraws];
+    // Map investment settlements to kind = "return"
+    const mappedSettlements: UnifiedTx[] = settlements.map((s) => ({
+      id: `settlement-${s.id}`,
+      kind: "return",
+      amount: Number(String(s.amount ?? "0").replace(/,/g, "")) || 0,
+      txRef: `Settlement-${s.id}`,
+      proofUrl: null,
+      status: String(s.status ?? ""),
+      createdAt: s.createdAt ?? s.updatedAt ?? null,
+      source: "Investment",
+    }));
+
+    const combined = [
+      ...mappedDeposits,
+      ...mappedWithdraws,
+      ...mappedSettlements,
+    ];
     combined.sort((a, b) => {
       const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
       const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
       return tb - ta;
     });
     return combined;
-  }, [resp]);
+  }, [safeResp]);
 
   // Filter & search
   const filtered = useMemo(() => {
@@ -452,7 +490,7 @@ export default function TransactionHistory() {
             Transaction History
           </h1>
           <p className="text-muted-foreground text-lg">
-            Deposits & Withdrawals — complete chronological history
+            Deposits, Withdrawals & Settlements — complete chronological history
           </p>
         </div>
         <div className="flex gap-3">
@@ -495,6 +533,7 @@ export default function TransactionHistory() {
                 <SelectItem value="all">All Types</SelectItem>
                 <SelectItem value="deposit">Deposits</SelectItem>
                 <SelectItem value="withdrawal">Withdrawals</SelectItem>
+                <SelectItem value="return">Settlements / Returns</SelectItem>
               </SelectContent>
             </Select>
 
@@ -614,7 +653,9 @@ export default function TransactionHistory() {
                                   >
                                     {t.kind === "deposit"
                                       ? "Deposit"
-                                      : "Withdrawal"}
+                                      : t.kind === "withdrawal"
+                                      ? "Withdrawal"
+                                      : "Settlement"}
                                   </Badge>
                                 </div>
                               </div>
@@ -623,13 +664,15 @@ export default function TransactionHistory() {
                               <p
                                 className={cn(
                                   "font-bold text-lg",
-                                  t.kind === "deposit"
+                                  t.kind === "deposit" || t.kind === "return"
                                     ? "text-success"
                                     : "text-warning"
                                 )}
                               >
-                                {t.kind === "deposit" ? "+" : "-"}$
-                                {t.amount.toLocaleString()}
+                                {t.kind === "deposit" || t.kind === "return"
+                                  ? "+"
+                                  : "-"}
+                                ${t.amount.toLocaleString()}
                               </p>
                             </TableCell>
                             <TableCell>
