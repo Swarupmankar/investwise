@@ -29,7 +29,11 @@ import type {
   SupportTicket,
 } from "@/types/support/support.types";
 
+import { useToast } from "@/components/ui/use-toast";
+
 export default function Support() {
+  const { toast } = useToast();
+
   const [activeTab, setActiveTab] = useState<"tickets" | "new">("tickets");
 
   // fetch all tickets
@@ -72,25 +76,19 @@ export default function Support() {
   const [newMessage, setNewMessage] = useState("");
   const [replyAttachment, setReplyAttachment] = useState<File | null>(null);
 
+  // stable preview URL for reply attachment (avoid creating URL on every render)
+  const [replyPreviewUrl, setReplyPreviewUrl] = useState<string | null>(null);
+
   // image modal
   const [modalImage, setModalImage] = useState<string | null>(null);
 
-  // simple local toast (you can swap to your useToast hook if preferred)
-  const [toast, setToast] = useState<null | {
-    type: "success" | "error" | "info";
-    message: string;
-  }>(null);
-  const showToast = (
-    type: "success" | "error" | "info",
-    message: string,
-    duration = 4000
-  ) => {
-    setToast({ type, message });
-    window.setTimeout(() => setToast(null), duration);
-  };
-
   // refs
   const messagesRef = useRef<HTMLDivElement | null>(null);
+  const prevMessagesLenRef = useRef<number>(0);
+
+  // For temporary highlight of the newest message
+  const [flashMessageId, setFlashMessageId] = useState<number | null>(null);
+  const flashTimeoutRef = useRef<number | null>(null);
 
   // auto-select first ticket when loaded
   useEffect(() => {
@@ -109,14 +107,87 @@ export default function Support() {
     selectedTicketData?.ticket ?? null;
   const ticketMessages: SupportReply[] = selectedTicket?.replies ?? [];
 
-  // scroll to bottom after messages load
+  // create & cleanup reply previewUrl when replyAttachment changes
+  useEffect(() => {
+    if (!replyAttachment) {
+      // clear preview if attachment cleared
+      setReplyPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(replyAttachment);
+    setReplyPreviewUrl(url);
+    return () => {
+      try {
+        URL.revokeObjectURL(url);
+      } catch {}
+    };
+  }, [replyAttachment]);
+
+  // scroll to bottom after initial load of messages (non-blinking)
   useEffect(() => {
     if (!singleLoading && messagesRef.current) {
+      // set prevMessagesLenRef so next change is compared correctly
+      prevMessagesLenRef.current = ticketMessages.length;
+      // small delay to allow layout to settle
       setTimeout(() => {
         messagesRef.current!.scrollTop = messagesRef.current!.scrollHeight;
       }, 50);
     }
-  }, [singleLoading, ticketMessages.length, selectedTicketNumericId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [singleLoading, selectedTicketNumericId]);
+
+  // smarter auto-scroll: only scroll if user is near bottom already
+  useEffect(() => {
+    const container = messagesRef.current;
+    if (!container) {
+      prevMessagesLenRef.current = ticketMessages.length;
+      return;
+    }
+
+    const prevLen = prevMessagesLenRef.current;
+    const curLen = ticketMessages.length;
+
+    const isNearBottom = (threshold = 150) => {
+      const distanceFromBottom =
+        container.scrollHeight - container.scrollTop - container.clientHeight;
+      return distanceFromBottom < threshold;
+    };
+
+    // initial load handled in other effect; handle appended messages here
+    if (curLen > prevLen) {
+      // new message appended
+      if (isNearBottom(200)) {
+        // smooth scroll to last message (prefer last element)
+        const lastEl = container.lastElementChild as HTMLElement | null;
+        if (lastEl) lastEl.scrollIntoView({ behavior: "smooth", block: "end" });
+        else
+          container.scrollTo({
+            top: container.scrollHeight,
+            behavior: "smooth",
+          });
+      } else {
+        // don't auto-scroll; user reading earlier messages
+        // optionally you can show a "New messages" button here
+      }
+
+      // flash newest message id
+      const newest = ticketMessages[curLen - 1];
+      const newId = newest?.id ?? null;
+      if (newId !== null) {
+        setFlashMessageId(newId);
+        if (flashTimeoutRef.current) {
+          window.clearTimeout(flashTimeoutRef.current);
+        }
+        flashTimeoutRef.current = window.setTimeout(() => {
+          setFlashMessageId(null);
+          flashTimeoutRef.current = null;
+        }, 1500);
+      }
+    }
+
+    prevMessagesLenRef.current = curLen;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ticketMessages.length]);
 
   // disable body scroll when modal open
   useEffect(() => {
@@ -135,6 +206,22 @@ export default function Support() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  useEffect(() => {
+    // Refetch the current ticket when ticketMessages length changes (new replies added)
+    if (selectedTicketNumericId && ticketMessages.length > 0) {
+      const hasTempReply = ticketMessages.some((msg) => msg.id < 0); // temp replies have negative IDs
+
+      if (hasTempReply) {
+        // If there's a temp reply, refetch after a delay to get the actual server data
+        const timer = setTimeout(() => {
+          refetchSingle();
+        }, 1000);
+
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [ticketMessages.length, selectedTicketNumericId, refetchSingle]);
 
   // helpers
   const formatBytes = (n: number) => {
@@ -170,7 +257,11 @@ export default function Support() {
   // CREATE TICKET
   const handleCreateTicket = async () => {
     if (!newTicketSubject.trim() || !newTicketMessage.trim()) {
-      showToast("info", "Please fill subject and description.");
+      toast({
+        title: "Missing fields",
+        description: "Please fill subject and description.",
+        variant: "destructive",
+      });
       return;
     }
     try {
@@ -181,25 +272,58 @@ export default function Support() {
       if (attachments.length > 0) payload.file = attachments[0];
 
       await createTicket(payload).unwrap();
-      showToast("success", "Ticket created — refreshing list.");
+
+      toast({
+        title: "Ticket created",
+        description: "Ticket created — switching to new ticket.",
+        variant: "default",
+      });
+
+      // Clear form first
       setNewTicketSubject("");
       setNewTicketMessage("");
       setAttachments([]);
+
+      // Switch to tickets tab immediately
       setActiveTab("tickets");
-      refetchTickets();
+
+      // Refetch tickets and wait for the data to update
+      const updatedTickets = await refetchTickets();
+
+      // Find and select the newest ticket
+      if (
+        updatedTickets.data?.tickets &&
+        updatedTickets.data.tickets.length > 0
+      ) {
+        // Newest ticket is usually the first one in the array
+        const newestTicket = updatedTickets.data.tickets[0];
+        setSelectedTicketNumericId(newestTicket.id);
+      }
     } catch (err: any) {
-      showToast("error", err?.data?.message ?? "Failed to create ticket");
+      toast({
+        title: "Failed to create ticket",
+        description: err?.data?.message ?? "Please try again.",
+        variant: "destructive",
+      });
     }
   };
 
   // SEND REPLY
   const handleSendReply = async () => {
     if (!selectedTicketNumericId) {
-      showToast("info", "Select a ticket first.");
+      toast({
+        title: "No ticket selected",
+        description: "Select a ticket first.",
+        variant: "destructive",
+      });
       return;
     }
     if (!newMessage.trim() && !replyAttachment) {
-      showToast("info", "Please enter a message or attach a file.");
+      toast({
+        title: "Empty reply",
+        description: "Please enter a message or attach a file.",
+        variant: "destructive",
+      });
       return;
     }
     try {
@@ -208,22 +332,50 @@ export default function Support() {
         content: newMessage.trim(),
         file: replyAttachment ?? undefined,
       };
+
+      // call mutation (optimistic update + in-place replace handled in API onQueryStarted)
       await createReply(payload).unwrap();
-      showToast("success", "Reply sent.");
+
+      toast({
+        title: "Reply sent",
+        description: "Your reply was sent.",
+        variant: "default",
+      });
+
+      // clear inputs + revoke preview
       setNewMessage("");
       setReplyAttachment(null);
-      refetchSingle();
-      refetchTickets();
+      setReplyPreviewUrl(null);
+
+      // clear underlying file input element value (if present)
+      const fileEl = document.getElementById(
+        "reply-file"
+      ) as HTMLInputElement | null;
+      if (fileEl) fileEl.value = "";
+
+      // smooth scroll to bottom if user near bottom (give optimistic patch time)
       setTimeout(() => {
-        if (messagesRef.current)
-          messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
-      }, 150);
+        const container = messagesRef.current;
+        if (!container) return;
+        const distanceFromBottom =
+          container.scrollHeight - container.scrollTop - container.clientHeight;
+        if (distanceFromBottom < 300) {
+          container.scrollTo({
+            top: container.scrollHeight,
+            behavior: "smooth",
+          });
+        }
+      }, 120);
     } catch (err: any) {
-      showToast("error", err?.data?.message ?? "Failed to send reply");
+      toast({
+        title: "Failed to send reply",
+        description: err?.data?.message ?? "Please try again.",
+        variant: "destructive",
+      });
     }
   };
 
-  // skeletons
+  // JSX skeletons and markup remain mostly the same but use replyPreviewUrl for the preview image
   const TicketsListSkeleton = () => (
     <div className="space-y-3">
       {Array.from({ length: 3 }).map((_, i) => (
@@ -401,7 +553,7 @@ export default function Support() {
 
                         <div className="flex justify-between text-xs text-muted-foreground">
                           <span>{formatTimestamp24(ticket.createdAt)}</span>
-                          <span>{ticket.replies?.length ?? 0} replies</span>
+                          {/* <span>{ticket.replies?.length ?? 0} replies</span> */}
                         </div>
                       </div>
                     ))}
@@ -410,7 +562,7 @@ export default function Support() {
               </Card>
 
               {/* Conversation card */}
-              <Card className="bg-card border-border flex flex-col h-[60vh]">
+              <Card className="bg-card border-border flex flex-col h-[70vh]">
                 <CardHeader>
                   <div className="flex items-center justify-between w-full">
                     <div>
@@ -502,18 +654,25 @@ export default function Support() {
                               /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/i.test(
                                 m.screenshot
                               );
+                            const shouldFlash = flashMessageId === m.id;
+
                             return (
                               <div
                                 key={m.id}
+                                data-msg-id={m.id}
                                 className={`flex ${
                                   m.isAdmin ? "justify-start" : "justify-end"
                                 }`}
                               >
                                 <div
-                                  className={`max-w-[80%] p-3 rounded-lg ${
+                                  className={`max-w-[80%] p-3 rounded-lg transition-transform duration-200 ${
                                     m.isAdmin
                                       ? "bg-muted text-foreground"
                                       : "bg-primary text-primary-foreground"
+                                  } ${
+                                    shouldFlash
+                                      ? "ring-2 ring-accent/60 transform-gpu scale-[1.01]"
+                                      : ""
                                   }`}
                                 >
                                   <div className="flex items-center gap-2 mb-1">
@@ -593,11 +752,11 @@ export default function Support() {
                               type="file"
                               accept="image/*,.pdf,.doc,.docx"
                               className="hidden"
-                              onChange={(e) =>
+                              onChange={(e) => {
                                 setReplyAttachment(
                                   e.currentTarget.files?.[0] ?? null
-                                )
-                              }
+                                );
+                              }}
                             />
                             <label
                               htmlFor="reply-file"
@@ -616,13 +775,12 @@ export default function Support() {
                                   replyAttachment.name
                                 ) ? (
                                   <img
-                                    src={URL.createObjectURL(replyAttachment)}
+                                    src={replyPreviewUrl ?? ""}
                                     alt="preview"
                                     className="h-10 w-10 object-cover rounded-md border cursor-pointer"
                                     onClick={() =>
-                                      setModalImage(
-                                        URL.createObjectURL(replyAttachment)
-                                      )
+                                      replyPreviewUrl &&
+                                      setModalImage(replyPreviewUrl)
                                     }
                                   />
                                 ) : (
@@ -635,6 +793,7 @@ export default function Support() {
                                   type="button"
                                   onClick={() => {
                                     setReplyAttachment(null);
+                                    setReplyPreviewUrl(null);
                                     const el = document.getElementById(
                                       "reply-file"
                                     ) as HTMLInputElement | null;
@@ -786,26 +945,10 @@ export default function Support() {
             </button>
             <img
               src={modalImage}
-              alt="attachment"
+              alt="attachment preview"
               className="max-w-full max-h-[90vh] rounded-md object-contain"
             />
           </div>
-        </div>
-      )}
-
-      {/* toast */}
-      {toast && (
-        <div
-          className={`fixed right-4 bottom-6 z-50 max-w-xs rounded-md px-4 py-2 shadow-lg ${
-            toast.type === "success"
-              ? "bg-green-600 text-white"
-              : toast.type === "error"
-              ? "bg-red-600 text-white"
-              : "bg-gray-800 text-white"
-          }`}
-          role="status"
-        >
-          <div className="text-sm">{toast.message}</div>
         </div>
       )}
     </div>

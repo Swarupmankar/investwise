@@ -76,6 +76,8 @@ const normalizeForUI = (raw: any) => {
       | "ReferralOnePercent"
       | "ReferralThreeMonths"
       | undefined,
+    referralCode:
+      (raw as any).referralCode ?? raw.referredBy?.Referral?.code ?? undefined,
   } as const;
 };
 
@@ -165,7 +167,7 @@ const computeMonthlyCycle = (startDateCandidate?: Date) => {
     progressRounded: Math.round(Math.max(0, Math.min(100, progressPct))),
 
     // close button date
-    isFirstOfMonthToday: now.getDate() === 14,
+    isFirstOfMonthToday: now.getDate() === 1,
   };
 };
 
@@ -230,7 +232,6 @@ const computeReferralThreeMonthCycle = (startDateCandidate?: Date) => {
     progressPct: Math.max(0, Math.min(100, progressPct)),
     progressRounded: Math.round(Math.max(0, Math.min(100, progressPct))),
     isFirstOfMonthToday: now.getDate() === 1,
-    // isFirstOfMonthToday: [4, 5].includes(now.getDate()),
   };
 };
 /** Component **/
@@ -558,9 +559,15 @@ export default function InvestmentManagement(): JSX.Element {
               </div>
             </div>
 
-            {/* Returns & Maturity */}
+            {/* Returns, Maturity & Referral */}
             <div className="p-4 bg-gradient-to-r from-success/5 via-success/10 to-success/5 rounded-xl border border-success/20">
-              <div className="grid grid-cols-2 gap-4">
+              {/* dynamically choose 2 or 3 columns so we don't render an empty cell */}
+              <div
+                className={`grid grid-cols-1 md:grid-cols-${
+                  investment.referralCode ? "3" : "2"
+                } gap-4`}
+              >
+                {/* RETURNS */}
                 <div className="text-center space-y-2">
                   <div className="flex items-center justify-center gap-2 mb-1">
                     <TrendingUp className="h-4 w-4 text-success" />
@@ -575,6 +582,8 @@ export default function InvestmentManagement(): JSX.Element {
                     Till now in a month
                   </p>
                 </div>
+
+                {/* MATURITY */}
                 <div className="text-center space-y-2">
                   <div className="flex items-center justify-center gap-2 mb-1">
                     <Calendar className="h-4 w-4 text-foreground" />
@@ -589,6 +598,24 @@ export default function InvestmentManagement(): JSX.Element {
                     Return available
                   </p>
                 </div>
+
+                {/* REFERRAL CODE — only rendered when present (no placeholder otherwise) */}
+                {investment.referralCode && (
+                  <div className="text-center space-y-2">
+                    <div className="flex items-center justify-center gap-2 mb-1">
+                      <Info className="h-4 w-4 text-foreground" />
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                        Referral Code
+                      </p>
+                    </div>
+                    <p className="text-lg font-bold text-foreground">
+                      {investment.referralCode}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Used for referral rewards
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
 

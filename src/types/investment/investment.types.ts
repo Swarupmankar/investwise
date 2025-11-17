@@ -27,6 +27,8 @@ export interface InvestmentRaw {
   thisMonthsReturns: string;
   lastReturnsRecieved?: string | null;
   referralInvestmentType?: ReferralInvestmentType | null;
+  referralCode?: string | null;
+  referredBy?: { Referral?: { code?: string } };
   userId: number;
   createdAt: string;
   updatedAt: string;
@@ -51,6 +53,7 @@ export interface InvestmentNormalized {
   startDate: string;
   roi: number;
   referralInvestmentType?: ReferralInvestmentType;
+  referralCode?: string;
 }
 
 export type CreateInvestmentRequest = {

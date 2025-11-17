@@ -1,4 +1,5 @@
-import { useState } from "react";
+// src/components/WithdrawalVerification.tsx
+import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,16 +23,16 @@ interface WithdrawalVerificationProps {
     amount: number;
     status: string;
     verificationAttempts?: number;
-    screenshotUrl?: string;
+    screenshotUrl?: string; // client proof on server
     adminProofUrl?: string;
     verificationDeadline?: string;
     isBlocked?: boolean;
   };
   onUploadScreenshot: (file: File) => Promise<{ success: boolean }>;
-  // made optional + guarded (prevents "not a function")
   onVerificationComplete?: (
     action: "client_uploaded" | "admin_approved" | "approve_final" | "reject"
   ) => Promise<{ success: boolean }>;
+  // total count for ADMIN_PROOF_UPLOADED without client proof
   pendingUploadsCount: number;
 }
 
@@ -40,10 +41,11 @@ const API_ORIGIN =
 
 const normalizeImageUrl = (url?: string) => {
   if (!url) return "";
-  if (/^https?:\/\//i.test(url)) return url; // already absolute
-  // prefix relative paths from API origin (handles "/upload/..." and "upload/...")
+  if (/^https?:\/\//i.test(url)) return url;
   return `${API_ORIGIN}${url.startsWith("/") ? "" : "/"}${url}`;
 };
+
+const MAX_PENDING_UPLOADS = 3;
 
 const WithdrawalVerification = ({
   withdrawal,
@@ -51,22 +53,46 @@ const WithdrawalVerification = ({
   onVerificationComplete,
   pendingUploadsCount,
 }: WithdrawalVerificationProps) => {
-  const status = (withdrawal.status || "").toUpperCase();
+  const status = (withdrawal?.status || "").toUpperCase();
 
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  // Preview + upload state
   const [uploadedImage, setUploadedImage] = useState<string>(
     withdrawal.screenshotUrl || ""
   );
-  const [isUploading, setIsUploading] = useState(false);
-  const [adminImgError, setAdminImgError] = useState(false); // fallback for admin proof
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
-  const maxPendingUploads = 3;
-  const isBlocked = pendingUploadsCount >= maxPendingUploads;
+  // Single source of truth whether upload is present or we should hide upload UI.
+  const [hasServerUpload, setHasServerUpload] = useState<boolean>(() => {
+    const serverHasUrl = Boolean(withdrawal?.screenshotUrl);
+    const statusIndicatesClientUploaded = [
+      "REVIEW",
+      "APPROVED",
+      "COMPLETE",
+    ].includes((withdrawal?.status || "").toUpperCase());
+    return serverHasUrl || statusIndicatesClientUploaded;
+  });
+
+  const [isUploading, setIsUploading] = useState(false);
+  const [adminImgError, setAdminImgError] = useState(false);
+
+  // Keep uploadedImage and hasServerUpload synced when props change
+  useEffect(() => {
+    if (withdrawal.screenshotUrl) {
+      setUploadedImage((prev) => prev || withdrawal.screenshotUrl!);
+    }
+    const serverHasUrl = Boolean(withdrawal?.screenshotUrl);
+    const statusIndicatesClientUploaded = [
+      "REVIEW",
+      "APPROVED",
+      "COMPLETE",
+    ].includes(status);
+    setHasServerUpload(serverHasUrl || statusIndicatesClientUploaded);
+  }, [withdrawal.screenshotUrl, status]);
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+    const file = event.target.files?.[0] || null;
+    setSelectedFile(file);
     if (file) {
-      setSelectedFile(file);
       const reader = new FileReader();
       reader.onload = (e) => setUploadedImage(e.target?.result as string);
       reader.readAsDataURL(file);
@@ -74,26 +100,25 @@ const WithdrawalVerification = ({
   };
 
   const handleUpload = async () => {
-    if (!selectedFile) return;
+    if (!selectedFile || hasServerUpload) return;
     setIsUploading(true);
     try {
       await onUploadScreenshot(selectedFile);
-      // keep preview visible; you can clear selectedFile if you want
-      // setSelectedFile(null);
+      // After successful upload, mark as having server upload so UI hides upload controls
+      setHasServerUpload(true);
+      setSelectedFile(null);
     } finally {
       setIsUploading(false);
     }
   };
 
   const handleVerificationComplete = async () => {
-    // guard to prevent runtime error if parent didn't pass this
     if (onVerificationComplete) {
       await onVerificationComplete("client_uploaded");
     }
   };
 
   const getStatusIcon = () => {
-    if (isBlocked) return <XCircle className="w-5 h-5 text-destructive" />;
     if (status === "APPROVED")
       return <CheckCircle className="w-5 h-5 text-success" />;
     if (status === "REVIEW") return <Clock className="w-5 h-5 text-warning" />;
@@ -156,57 +181,34 @@ const WithdrawalVerification = ({
     }
   };
 
+  // Counter display — only for ADMIN_PROOF_UPLOADED
+  const showPendingStrip = status === "ADMIN_PROOF_UPLOADED";
+  const safeCount = Math.max(
+    0,
+    Math.min(pendingUploadsCount, MAX_PENDING_UPLOADS)
+  );
+  const remaining = Math.max(0, MAX_PENDING_UPLOADS - safeCount);
+  const stripText = `(${safeCount}/${MAX_PENDING_UPLOADS}) ${remaining} remaining`;
+
+  // SHOW upload UI only when admin has uploaded proof AND user has NOT uploaded yet.
+  // Do NOT show upload UI for REVIEW state.
+  const showUploadSection =
+    status === "ADMIN_PROOF_UPLOADED" &&
+    !hasServerUpload &&
+    !withdrawal.screenshotUrl;
+
   const getPendingUploadsColor = () => {
-    if (pendingUploadsCount >= 3) return "text-destructive";
-    if (pendingUploadsCount >= 2) return "text-warning";
+    if (safeCount >= 3) return "text-destructive";
+    if (safeCount >= 2) return "text-warning";
     return "text-success";
   };
-
-  if (isBlocked) {
-    return (
-      <Card className="border-destructive/20 bg-destructive/5">
-        <CardContent className="p-6">
-          <div className="text-center space-y-4">
-            <div className="w-16 h-16 bg-destructive/10 rounded-full flex items-center justify-center mx-auto">
-              <Shield className="w-8 h-8 text-destructive" />
-            </div>
-            <div>
-              <h3 className="text-lg font-semibold text-destructive">
-                Withdrawal Blocked
-              </h3>
-              <p className="text-muted-foreground mt-2">
-                Your withdrawal functionality has been temporarily blocked due
-                to multiple failed verification attempts.
-              </p>
-            </div>
-            <div className="p-4 bg-destructive/10 rounded-lg">
-              <p className="text-sm font-medium text-destructive mb-2">
-                You have {pendingUploadsCount} withdrawals pending screenshot
-                upload
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Please upload screenshots for your previous withdrawals before
-                creating new ones.
-              </p>
-            </div>
-            <Button
-              variant="outline"
-              className="border-destructive text-destructive hover:bg-destructive/10"
-            >
-              Contact Support
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
 
   return (
     <Card className="card-premium">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           {getStatusIcon()}
-          <span>{"Withdrawal Verification"}</span>
+          <span>Withdrawal Verification</span>
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -242,7 +244,7 @@ const WithdrawalVerification = ({
           </div>
         </div>
 
-        {/* Admin proof — inline in the card with a safe fallback (no modal/new tab) */}
+        {/* Admin proof preview */}
         {status === "ADMIN_PROOF_UPLOADED" && withdrawal.adminProofUrl && (
           <div className="space-y-3">
             <div className="flex items-center justify-between">
@@ -271,38 +273,56 @@ const WithdrawalVerification = ({
                 rel="noreferrer"
                 className="inline-flex items-center gap-2 text-sm underline"
               >
-                <ExternalLink className="w-4 h-4" />
-                Open admin proof
+                <ExternalLink className="w-4 h-4" /> Open admin proof
               </a>
             )}
 
-            <div className="p-3 bg-primary/10 border border-primary/20 rounded-lg">
-              <p className="text-sm text-primary font-medium">Next Step:</p>
-              <p className="text-sm text-muted-foreground">
-                Please check your wallet and upload a screenshot of the received
-                payment for verification.
-              </p>
-            </div>
+            {!hasServerUpload && (
+              <div className="p-3 bg-primary/10 border border-primary/20 rounded-lg">
+                <p className="text-sm text-primary font-medium">Next Step:</p>
+                <p className="text-sm text-muted-foreground">
+                  Please check your wallet and upload a screenshot of the
+                  received payment for verification.
+                </p>
+              </div>
+            )}
           </div>
         )}
 
-        {/* Pending uploads counter */}
-        <div className="flex items-center justify-between p-3 bg-muted/20 rounded-lg">
-          <div className="flex items-center gap-2">
-            <AlertTriangle
-              className={cn("w-4 h-4", getPendingUploadsColor())}
-            />
-            <span className="text-sm font-medium">
-              Pending Screenshot Uploads
+        {/* Pending uploads strip — ONLY when ADMIN_PROOF_UPLOADED and no client proof yet */}
+        {showPendingStrip && !hasServerUpload && (
+          <div className="flex items-center justify-between p-3 bg-muted/20 rounded-lg">
+            <div className="flex items-center gap-2">
+              <AlertTriangle
+                className={cn("w-4 h-4", getPendingUploadsColor())}
+              />
+              <span className="text-sm font-medium">
+                Pending Screenshot Uploads
+              </span>
+            </div>
+            <span className={cn("font-bold", getPendingUploadsColor())}>
+              {stripText}
             </span>
           </div>
-          <span className={cn("font-bold", getPendingUploadsColor())}>
-            {pendingUploadsCount}/{maxPendingUploads} (
-            {maxPendingUploads - pendingUploadsCount} remaining)
-          </span>
-        </div>
+        )}
 
-        {/* Awaiting admin approval */}
+        {/* Show confirmation message when user has uploaded proof but status is still ADMIN_PROOF_UPLOADED */}
+        {status === "ADMIN_PROOF_UPLOADED" && hasServerUpload && (
+          <div className="p-4 bg-success/10 border border-success/20 rounded-lg">
+            <div className="flex items-center gap-2">
+              <CheckCircle className="w-5 h-5 text-success" />
+              <span className="font-medium text-success">
+                Proof Uploaded Successfully
+              </span>
+            </div>
+            <p className="text-sm text-muted-foreground mt-1">
+              Your payment confirmation has been submitted and is awaiting admin
+              review.
+            </p>
+          </div>
+        )}
+
+        {/* Awaiting admin approval (no strip here) */}
         {status === "PENDING" && (
           <div className="p-4 bg-muted/10 border border-muted/20 rounded-lg text-center">
             <Clock className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
@@ -316,8 +336,8 @@ const WithdrawalVerification = ({
           </div>
         )}
 
-        {/* Upload section */}
-        {(status === "ADMIN_PROOF_UPLOADED" || status === "REVIEW") && (
+        {/* Upload section - ONLY for ADMIN_PROOF_UPLOADED and when no proof uploaded yet */}
+        {showUploadSection && (
           <div className="space-y-4">
             <div className="p-4 bg-primary/5 border border-primary/20 rounded-lg">
               <h4 className="font-medium text-primary mb-2">
@@ -330,6 +350,7 @@ const WithdrawalVerification = ({
               </p>
             </div>
 
+            {/* Only show the file upload interface when there's no server proof */}
             {uploadedImage ? (
               <div className="space-y-4">
                 <div className="border-2 border-dashed border-border rounded-lg p-4">
@@ -339,7 +360,7 @@ const WithdrawalVerification = ({
                     className="max-h-48 mx-auto rounded-lg"
                   />
                 </div>
-                {/* Only show this button if parent provided the handler */}
+
                 {onVerificationComplete && (
                   <Button
                     onClick={handleVerificationComplete}
@@ -348,14 +369,16 @@ const WithdrawalVerification = ({
                     Confirm & Submit for Review
                   </Button>
                 )}
-                {/* Always allow uploading to server */}
-                <Button
-                  onClick={handleUpload}
-                  disabled={isUploading}
-                  className="w-full gradient-primary text-white"
-                >
-                  {isUploading ? "Uploading..." : "Upload Proof"}
-                </Button>
+
+                {!hasServerUpload && (
+                  <Button
+                    onClick={handleUpload}
+                    disabled={isUploading}
+                    className="w-full gradient-primary text-white"
+                  >
+                    {isUploading ? "Uploading..." : "Upload Proof"}
+                  </Button>
+                )}
               </div>
             ) : (
               <div className="space-y-4">
@@ -379,13 +402,14 @@ const WithdrawalVerification = ({
                     accept="image/*"
                     onChange={handleFileSelect}
                     className="hidden"
+                    disabled={hasServerUpload}
                   />
                   <p className="text-xs text-muted-foreground mt-2">
                     PNG, JPG up to 5MB
                   </p>
                 </div>
 
-                {selectedFile && (
+                {selectedFile && !hasServerUpload && (
                   <Button
                     onClick={handleUpload}
                     disabled={isUploading}
@@ -427,25 +451,6 @@ const WithdrawalVerification = ({
             <span className="text-sm">
               Withdrawal was rejected. Please contact support.
             </span>
-          </div>
-        )}
-
-        {/* Warning for many pending uploads */}
-        {pendingUploadsCount >= 2 && pendingUploadsCount < 3 && (
-          <div className="p-4 bg-warning/10 border border-warning/20 rounded-lg">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 text-warning mt-0.5" />
-              <div>
-                <p className="font-medium text-warning">
-                  Warning: Multiple Pending Uploads
-                </p>
-                <p className="text-sm text-muted-foreground mt-1">
-                  You have {pendingUploadsCount} withdrawals pending screenshot
-                  upload. Upload screenshots soon to avoid being blocked from
-                  new withdrawals.
-                </p>
-              </div>
-            </div>
           </div>
         )}
       </CardContent>
