@@ -13,7 +13,7 @@ import { motion, AnimatePresence } from "framer-motion";
 interface NotificationBannerItem {
   id: string;
   rawId?: number;
-  type: "info" | "warning" | "success";
+  type: "info" | "warning" | "success" | "danger";
   title: string;
   message: string;
   dismissible?: boolean;
@@ -41,6 +41,13 @@ const typeConfig = {
       "bg-gradient-to-r from-emerald-50 to-emerald-100/40 border border-emerald-200 text-emerald-900",
     button: "text-emerald-700 hover:bg-emerald-100",
   },
+  // optional: danger (rejected) reuse warning palette or add new
+  danger: {
+    icon: AlertTriangle,
+    wrapper:
+      "bg-gradient-to-r from-red-50 to-red-100/40 border border-red-200 text-red-900",
+    button: "text-red-700 hover:bg-red-100",
+  },
 };
 
 export default function NotificationBanner() {
@@ -50,57 +57,154 @@ export default function NotificationBanner() {
   >([]);
 
   // KYC Status
-  const { data: kycData } = useGetKycStatusQuery();
-  const rawStatus =
-    (kycData && (kycData as any).data?.status) ||
-    (kycData && (kycData as any).status) ||
-    "";
-  const statusNormalized = String(rawStatus ?? "")
-    .toLowerCase()
-    .trim();
+  const { data: kycDataRaw } = useGetKycStatusQuery();
+  // API might return { data: { ... } } or the object directly — handle both
+  const kycData =
+    (kycDataRaw && (kycDataRaw as any).data) || (kycDataRaw as any) || null;
 
-  const shouldShowKyc =
-    !!statusNormalized &&
-    /(pending|rejected|not[_\s]?submitted)/.test(statusNormalized);
+  // Helper to build a KYC notification from the full KYC object returned by getKycStatus
+  const buildKycNotification = (kyc: any): NotificationBannerItem | null => {
+    if (!kyc || !kyc.status) return null;
 
-  const kycNotification: NotificationBannerItem | null = shouldShowKyc
-    ? (() => {
-        if (/rejected/.test(statusNormalized)) {
-          return {
-            id: "kyc-rejected",
-            type: "warning",
-            title: "KYC Rejected",
-            message:
-              "Your KYC was rejected. Please re-submit correct documents to continue withdrawals.",
-            dismissible: true,
-            actionLabel: "Resubmit KYC",
-            actionHref: "/profile",
-          };
-        }
-        if (/pending/.test(statusNormalized)) {
-          return {
-            id: "kyc-pending",
-            type: "info",
-            title: "KYC Pending",
-            message:
-              "Your KYC is under review. You’ll be notified once approved.",
-            dismissible: true,
-            actionLabel: "View Status",
-            actionHref: "/profile",
-          };
-        }
+    // expected shape:
+    // kyc.status: 'not_submitted' | 'pending' | 'approved' | 'rejected'
+    // kyc.documents: { passportFront, passportBack, selfieWithId, utilityBill }
+    // each doc: { uploaded: boolean, status: 'NOT_SUBMITTED'|'PENDING'|'APPROVED'|'REJECTED', rejectionReason?: string|null }
+    const docMap = [
+      { key: "passportFront", label: "Passport Front" },
+      { key: "passportBack", label: "Passport Back" },
+      { key: "selfieWithId", label: "Selfie with ID" },
+      { key: "utilityBill", label: "Utility Bill" },
+    ];
+
+    const perDocs = docMap.map((m) => ({
+      key: m.key,
+      label: m.label,
+      ...(kyc.documents
+        ? kyc.documents[m.key]
+        : { uploaded: false, status: "NOT_SUBMITTED", rejectionReason: null }),
+    }));
+
+    const uploadedCount = perDocs.filter((d) => Boolean(d.uploaded)).length;
+    const approvedCount = perDocs.filter((d) => d.status === "APPROVED").length;
+    const rejectedDocs = perDocs.filter((d) => d.status === "REJECTED");
+    const notSubmittedCount = perDocs.filter(
+      (d) => d.status === "NOT_SUBMITTED"
+    ).length;
+
+    // Fully approved -> no banner
+    if (kyc.status === "approved" || approvedCount === 4) {
+      return null;
+    }
+
+    // Rejected -> explicit rejection banner (show reasons if available)
+    if (
+      kyc.status === "rejected" ||
+      rejectedDocs.length > 0 ||
+      (kyc.rejectionReason && String(kyc.rejectionReason).trim().length > 0)
+    ) {
+      // build short human readable reason list (doc label + reason if available)
+      const reasonLines: string[] = [];
+
+      rejectedDocs.forEach((d: any) => {
+        if (d.rejectionReason)
+          reasonLines.push(`${d.label}: ${d.rejectionReason}`);
+        else reasonLines.push(`${d.label}: Rejected`);
+      });
+
+      if (
+        kyc.rejectionReason &&
+        String(kyc.rejectionReason).trim().length > 0
+      ) {
+        reasonLines.unshift(String(kyc.rejectionReason));
+      }
+
+      const reasonText = reasonLines.slice(0, 3).join("; "); // keep it concise
+
+      return {
+        id: "kyc-rejected",
+        type: "danger",
+        title: "KYC Rejected",
+        message:
+          reasonText.length > 0
+            ? `One or more documents were rejected. ${reasonText}. Please review the reason(s) and re-upload the corrected document(s).`
+            : "One or more of your KYC documents were rejected. Please review and re-submit.",
+        dismissible: false,
+        actionLabel: "View Status",
+        actionHref: "/profile",
+      };
+    }
+
+    // None uploaded -> prompt to complete KYC
+    if (uploadedCount === 0 || kyc.status === "not_submitted") {
+      return {
+        id: "kyc-not-submitted",
+        type: "warning",
+        title: "KYC Required",
+        message:
+          "Complete your KYC verification to unlock all platform features.",
+        dismissible: true,
+        actionLabel: "Complete KYC",
+        actionHref: "/profile",
+      };
+    }
+
+    // Some uploaded but not all
+    if (uploadedCount > 0 && uploadedCount < 4) {
+      const remaining = 4 - uploadedCount;
+      // If some uploaded are already approved -> ask to upload remaining
+      if (approvedCount > 0) {
         return {
-          id: "kyc-not-submitted",
+          id: "kyc-partial-upload",
           type: "warning",
-          title: "KYC Required",
-          message:
-            "Complete your KYC verification to unlock all platform features.",
+          title: "More documents required",
+          message: `We have received ${uploadedCount} of 4 documents. ${approvedCount} approved. Please upload the remaining ${remaining} document(s) to complete verification.`,
           dismissible: true,
-          actionLabel: "Complete KYC",
+          actionLabel: "Upload Documents",
           actionHref: "/profile",
         };
-      })()
-    : null;
+      }
+
+      // No uploaded docs approved yet — guide to upload/complete
+      return {
+        id: "kyc-partial-upload-pending",
+        type: "warning",
+        title: "KYC Incomplete",
+        message: `We have received ${uploadedCount} of 4 documents. Upload the remaining document(s) so we can verify your identity.`,
+        dismissible: true,
+        actionLabel: "Complete KYC",
+        actionHref: "/profile",
+      };
+    }
+
+    // All 4 uploaded but not all approved -> under review
+    if (uploadedCount === 4 && approvedCount < 4) {
+      const pendingCount = 4 - approvedCount;
+      return {
+        id: "kyc-under-review",
+        type: "info",
+        title: "KYC Under Review",
+        message: `All documents have been uploaded. ${pendingCount} document(s) remaining under review. You’ll be notified once verification is complete.`,
+        dismissible: true,
+        actionLabel: "View Status",
+        actionHref: "/profile",
+      };
+    }
+
+    // Fallback pending
+    return {
+      id: "kyc-pending",
+      type: "warning",
+      title: "KYC Pending",
+      message: "Your KYC is under review. You’ll be notified once approved.",
+      dismissible: true,
+      actionLabel: "View Status",
+      actionHref: "/profile",
+    };
+  };
+
+  const kycNotification: NotificationBannerItem | null =
+    buildKycNotification(kycData);
 
   // Notifications
   const { data: notificationsResp, isLoading: notificationsLoading } =
@@ -167,7 +271,7 @@ export default function NotificationBanner() {
     <motion.div layout className="space-y-3 mb-6">
       <AnimatePresence mode="popLayout">
         {visibleNotifications.map((n) => {
-          const cfg = typeConfig[n.type] || typeConfig.info;
+          const cfg = (typeConfig as any)[n.type] || typeConfig.info;
           const Icon = cfg.icon;
 
           return (

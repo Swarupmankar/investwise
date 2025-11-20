@@ -15,6 +15,7 @@ import {
   CheckCircle2,
   Clock,
   XCircle,
+  Bell,
 } from "lucide-react";
 import {
   useGetUserProfileQuery,
@@ -83,6 +84,18 @@ export default function Profile() {
   useEffect(() => {
     document.title = "Profile — KYC Verification";
   }, []);
+
+  // Persist active tab across refreshes (same pattern used in Withdraw)
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    try {
+      return localStorage.getItem("profile_active_tab") || "profile";
+    } catch {
+      return "profile";
+    }
+  });
+
+  // small local state used by the Refresh button so user sees activity
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // helpers
   const formatBytes = (bytes: number) => {
@@ -203,23 +216,62 @@ export default function Profile() {
     () => newPassword.length > 0 && newPassword === confirmPassword,
     [newPassword, confirmPassword]
   );
-  // ------------------------------------------------------------------------
 
   if (profileLoading || kycLoading) return <div>Loading...</div>;
-  if (!profile || profileError)
+
+  if (!profile || profileError) {
     return (
-      <div>
-        <p className="text-destructive">Failed to load profile.</p>
-        <Button
-          onClick={() => {
-            refetchProfile();
-            refetchKycStatus();
-          }}
-        >
-          Retry
-        </Button>
+      <div className="space-y-4">
+        <Card className="border-border">
+          <CardContent className="p-8 sm:p-10 md:p-12 text-center">
+            <Bell className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+            <h3 className="text-base sm:text-lg font-semibold text-foreground mb-2">
+              Unable to load profile
+            </h3>
+            <p className="text-muted-foreground">
+              There was a problem loading your profile. Try refreshing.
+            </p>
+          </CardContent>
+        </Card>
+
+        <div className="flex justify-center">
+          <Button
+            variant="default"
+            onClick={async () => {
+              console.info("Profile Refresh clicked");
+              setIsRefreshing(true);
+              try {
+                if (typeof refetchProfile === "function") {
+                  await refetchProfile();
+                } else {
+                  console.warn(
+                    "refetchProfile is not a function",
+                    refetchProfile
+                  );
+                }
+
+                if (typeof refetchKycStatus === "function") {
+                  await refetchKycStatus();
+                } else {
+                  console.warn(
+                    "refetchKycStatus is not a function",
+                    refetchKycStatus
+                  );
+                }
+              } catch (err) {
+                console.error("Refetch failed:", err);
+              } finally {
+                setTimeout(() => setIsRefreshing(false), 300);
+              }
+            }}
+            disabled={isRefreshing}
+          >
+            {isRefreshing ? "Refreshing..." : "Refresh"}
+          </Button>
+        </div>
       </div>
     );
+  }
 
   // Build combined address string for utility bill upload
   const combinedAddress =
@@ -302,7 +354,16 @@ export default function Profile() {
         </div>
       </div>
 
-      <Tabs defaultValue="profile" className="space-y-6">
+      <Tabs
+        value={activeTab}
+        onValueChange={(v) => {
+          setActiveTab(v);
+          try {
+            localStorage.setItem("profile_active_tab", v);
+          } catch {}
+        }}
+        className="space-y-6"
+      >
         <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="profile">Profile</TabsTrigger>
           <TabsTrigger value="security">Security</TabsTrigger>
@@ -562,7 +623,7 @@ export default function Profile() {
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <h4 className="font-medium text-card-foreground">
-                      Passport / ID (Front)
+                      Upload ID (Front)
                     </h4>
                     <Badge className={getKycStatusBadge(passportFrontStatus)}>
                       {passportFrontStatus}
@@ -571,7 +632,7 @@ export default function Profile() {
 
                   {passportFrontStatus !== "Not Submitted" ? (
                     <SubmittedCard
-                      title="Passport / ID (Front)"
+                      title="ID (Front)"
                       subtitle="JPG, PNG or PDF (Max 5MB)"
                       reason={passportFrontReason}
                       status={passportFrontStatus}
@@ -596,7 +657,7 @@ export default function Profile() {
                         >
                           <Upload className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
                           <p className="text-sm text-muted-foreground">
-                            Upload Passport / ID (Front)
+                            Upload ID (Front)
                           </p>
                         </label>
                       </div>
@@ -646,7 +707,7 @@ export default function Profile() {
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <h4 className="font-medium text-card-foreground">
-                      Passport / ID (Back)
+                      Upload ID (Back)
                     </h4>
                     <Badge className={getKycStatusBadge(passportBackStatus)}>
                       {passportBackStatus}
@@ -655,7 +716,7 @@ export default function Profile() {
 
                   {passportBackStatus !== "Not Submitted" ? (
                     <SubmittedCard
-                      title="Passport / ID (Back)"
+                      title="ID (Back)"
                       subtitle="JPG, PNG or PDF (Max 5MB)"
                       reason={passportBackReason}
                       status={passportBackStatus}
@@ -680,7 +741,7 @@ export default function Profile() {
                         >
                           <Upload className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
                           <p className="text-sm text-muted-foreground">
-                            Upload Passport / ID (Back)
+                            Upload ID (Back)
                           </p>
                         </label>
                       </div>

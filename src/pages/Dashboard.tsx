@@ -807,7 +807,7 @@ export default function Dashboard() {
                           </p>
 
                           {/* show prorated monthly earning for creation month, otherwise full month */}
-                          <p className="text-xs text-muted-foreground">{`~ $${monthlyEstimateFormatted} / month`}</p>
+                          <p className="text-xs text-muted-foreground">{`Approx - $${monthlyEstimateFormatted} / month`}</p>
                         </div>
 
                         <div className="text-center space-y-2">

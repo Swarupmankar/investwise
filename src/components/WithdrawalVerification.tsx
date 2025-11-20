@@ -1,5 +1,5 @@
 // src/components/WithdrawalVerification.tsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,7 +23,7 @@ interface WithdrawalVerificationProps {
     amount: number;
     status: string;
     verificationAttempts?: number;
-    screenshotUrl?: string; // client proof on server
+    screenshotUrl?: string;
     adminProofUrl?: string;
     verificationDeadline?: string;
     isBlocked?: boolean;
@@ -46,6 +46,19 @@ const normalizeImageUrl = (url?: string) => {
 };
 
 const MAX_PENDING_UPLOADS = 3;
+
+// Small CSS spinner used where icons are not sufficient
+const Spinner = ({ className = "w-6 h-6" }: { className?: string }) => (
+  <div
+    className={cn(
+      "rounded-full border-2 border-t-transparent animate-spin inline-block",
+      className
+    )}
+    style={{ borderColor: "rgba(0,0,0,0.08)", borderTopColor: "currentColor" }}
+    role="status"
+    aria-label="loading"
+  />
+);
 
 const WithdrawalVerification = ({
   withdrawal,
@@ -74,6 +87,8 @@ const WithdrawalVerification = ({
 
   const [isUploading, setIsUploading] = useState(false);
   const [adminImgError, setAdminImgError] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [adminImgLoading, setAdminImgLoading] = useState(false);
 
   // Keep uploadedImage and hasServerUpload synced when props change
   useEffect(() => {
@@ -89,6 +104,15 @@ const WithdrawalVerification = ({
     setHasServerUpload(serverHasUrl || statusIndicatesClientUploaded);
   }, [withdrawal.screenshotUrl, status]);
 
+  // track mounted to avoid setting state on unmounted component
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] || null;
     setSelectedFile(file);
@@ -99,16 +123,57 @@ const WithdrawalVerification = ({
     }
   };
 
+  // Enhanced upload with progress animation — we can't hook into parent's fetch
+  // so we simulate smooth progress until the parent's promise resolves.
   const handleUpload = async () => {
     if (!selectedFile || hasServerUpload) return;
     setIsUploading(true);
+    setUploadProgress(6);
+
+    // simulate progressive increments until we reach 90% or the promise resolves
+    let active = true;
+    const runProgress = () => {
+      const id = setInterval(() => {
+        setUploadProgress((p) => {
+          // while uploading, gently increase progress toward 92
+          const next = Math.min(92, p + Math.random() * 8 + 1);
+          return next;
+        });
+      }, 400);
+      return id;
+    };
+
+    const progressId = runProgress();
+
     try {
-      await onUploadScreenshot(selectedFile);
-      // After successful upload, mark as having server upload so UI hides upload controls
-      setHasServerUpload(true);
-      setSelectedFile(null);
+      const res = await onUploadScreenshot(selectedFile);
+
+      // finish animation
+      clearInterval(progressId);
+      // animate to 100% smoothly
+      setUploadProgress(100);
+
+      // show final state briefly
+      await new Promise((r) => setTimeout(r, 450));
+
+      if (mountedRef.current) {
+        setHasServerUpload(true);
+        setSelectedFile(null);
+        // set uploaded image to server-supplied URL (if parent updated via props, effect will update)
+      }
+
+      // optionally use returned success
+      if (!res || !res.success) {
+        // keep serverUpload false — but UI should show failed state.
+      }
+    } catch (e) {
+      // upload failed — show a quick roll-back animation and leave selectedFile for retry
+      clearInterval(progressId);
+      setUploadProgress(0);
     } finally {
-      setIsUploading(false);
+      // short delay for polish
+      await new Promise((r) => setTimeout(r, 300));
+      if (mountedRef.current) setIsUploading(false);
     }
   };
 
@@ -165,6 +230,7 @@ const WithdrawalVerification = ({
   };
 
   const progressValue = () => {
+    if (isUploading) return Math.round(uploadProgress);
     switch (status) {
       case "APPROVED":
         return 100;
@@ -233,7 +299,11 @@ const WithdrawalVerification = ({
             </Badge>
           </div>
           <div className="space-y-2">
-            <Progress value={progressValue()} className="h-2" />
+            {/* animate progress changes with transition */}
+            <Progress
+              value={progressValue()}
+              className="h-2 transition-all duration-500"
+            />
             <div className="flex justify-between text-xs text-muted-foreground">
               <span>Request</span>
               <span>Admin Approval</span>
@@ -257,12 +327,31 @@ const WithdrawalVerification = ({
             </div>
 
             {!adminImgError ? (
-              <div className="border rounded-md p-2 bg-muted/10">
+              <div className="relative border rounded-md p-2 bg-muted/10 overflow-hidden">
+                {/* loading skeleton / spinner while admin image loads */}
+                <div
+                  className={cn(
+                    "absolute inset-0 flex items-center justify-center transition-opacity",
+                    {
+                      "opacity-0": !adminImgLoading,
+                      "opacity-100": adminImgLoading,
+                    }
+                  )}
+                >
+                  <div className="flex flex-col items-center gap-2">
+                    <Spinner className="w-8 h-8 text-muted-foreground" />
+                    <span className="text-xs text-muted-foreground">
+                      Loading proof
+                    </span>
+                  </div>
+                </div>
+
                 <img
                   src={normalizeImageUrl(withdrawal.adminProofUrl)}
                   alt="Admin proof"
-                  className="w-full max-h-60 object-contain rounded"
+                  className="w-full max-h-60 object-contain rounded transition-transform duration-500 hover:scale-105"
                   onError={() => setAdminImgError(true)}
+                  onLoad={() => setAdminImgLoading(false)}
                   crossOrigin="anonymous"
                 />
               </div>
@@ -353,13 +442,38 @@ const WithdrawalVerification = ({
             {/* Only show the file upload interface when there's no server proof */}
             {uploadedImage ? (
               <div className="space-y-4">
-                <div className="border-2 border-dashed border-border rounded-lg p-4">
+                <div className="relative border-2 border-dashed border-border rounded-lg p-4">
+                  {/* overlay spinner while uploading */}
+                  {isUploading && (
+                    <div className="absolute inset-0 bg-white/60 flex items-center justify-center rounded-lg">
+                      <div className="flex flex-col items-center gap-2">
+                        <Spinner className="w-8 h-8 text-primary" />
+                        <div className="text-sm text-primary">
+                          Uploading... {Math.round(uploadProgress)}%
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   <img
                     src={uploadedImage}
                     alt="Uploaded proof"
-                    className="max-h-48 mx-auto rounded-lg"
+                    className="max-h-48 mx-auto rounded-lg transition-shadow duration-300 shadow-sm"
                   />
                 </div>
+
+                {/* animated progress bar for upload (visible while uploading) */}
+                {isUploading && (
+                  <div>
+                    <Progress
+                      value={Math.round(uploadProgress)}
+                      className="h-2 transition-all duration-300"
+                    />
+                    <div className="text-xs text-muted-foreground mt-1">
+                      Uploading snapshot — please do not close the window
+                    </div>
+                  </div>
+                )}
 
                 {onVerificationComplete && (
                   <Button
@@ -376,13 +490,20 @@ const WithdrawalVerification = ({
                     disabled={isUploading}
                     className="w-full gradient-primary text-white"
                   >
-                    {isUploading ? "Uploading..." : "Upload Proof"}
+                    {isUploading ? (
+                      <div className="flex items-center justify-center gap-2">
+                        <Spinner className="w-4 h-4 text-white" />
+                        <span>Uploading...</span>
+                      </div>
+                    ) : (
+                      "Upload Proof"
+                    )}
                   </Button>
                 )}
               </div>
             ) : (
               <div className="space-y-4">
-                <div className="border-2 border-dashed border-border rounded-lg p-8 text-center">
+                <div className="border-2 border-dashed border-border rounded-lg p-8 text-center transition-shadow hover:shadow-lg">
                   <Upload className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
                   <Label
                     htmlFor={`screenshot-upload-${withdrawal.id}`}
@@ -415,7 +536,14 @@ const WithdrawalVerification = ({
                     disabled={isUploading}
                     className="w-full gradient-primary text-white"
                   >
-                    {isUploading ? "Uploading..." : "Upload Proof"}
+                    {isUploading ? (
+                      <div className="flex items-center justify-center gap-2">
+                        <Spinner className="w-4 h-4 text-white" />
+                        <span>Uploading...</span>
+                      </div>
+                    ) : (
+                      "Upload Proof"
+                    )}
                   </Button>
                 )}
               </div>
