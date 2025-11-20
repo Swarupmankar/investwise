@@ -254,6 +254,13 @@ export default function Support() {
     }
   };
 
+  // Helper to detect PDF files (by MIME type and extension fallback)
+  const isPdf = (file: File | null | undefined) => {
+    if (!file) return false;
+    if (file.type === "application/pdf") return true;
+    return /\.pdf$/i.test(file.name);
+  };
+
   // CREATE TICKET
   const handleCreateTicket = async () => {
     if (!newTicketSubject.trim() || !newTicketMessage.trim()) {
@@ -264,6 +271,18 @@ export default function Support() {
       });
       return;
     }
+
+    // prevent PDFs from being submitted (extra safety)
+    if (attachments.length > 0 && isPdf(attachments[0])) {
+      toast({
+        title: "Unsupported file",
+        description:
+          "PDF uploads are not allowed. Please attach an image file.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       const payload: { file?: File; subject: string; content: string } = {
         subject: newTicketSubject.trim(),
@@ -283,19 +302,13 @@ export default function Support() {
       setNewTicketSubject("");
       setNewTicketMessage("");
       setAttachments([]);
-
-      // Switch to tickets tab immediately
       setActiveTab("tickets");
 
-      // Refetch tickets and wait for the data to update
       const updatedTickets = await refetchTickets();
-
-      // Find and select the newest ticket
       if (
         updatedTickets.data?.tickets &&
         updatedTickets.data.tickets.length > 0
       ) {
-        // Newest ticket is usually the first one in the array
         const newestTicket = updatedTickets.data.tickets[0];
         setSelectedTicketNumericId(newestTicket.id);
       }
@@ -326,6 +339,17 @@ export default function Support() {
       });
       return;
     }
+
+    if (isPdf(replyAttachment)) {
+      toast({
+        title: "Unsupported file",
+        description:
+          "PDF uploads are not allowed. Please attach an image or .doc/.docx file.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       const payload = {
         ticketId: selectedTicketNumericId,
@@ -373,6 +397,47 @@ export default function Support() {
         variant: "destructive",
       });
     }
+  };
+
+  // New: handlers that prevent selecting PDFs and show a toast
+  const handleTicketFileChange = (files: FileList | null) => {
+    const arr = Array.from(files || []);
+    if (arr.length === 0) return setAttachments([]);
+
+    // filter out PDFs if present
+    const nonPdfs = arr.filter((f) => !isPdf(f));
+    const pdfs = arr.filter((f) => isPdf(f));
+
+    if (pdfs.length > 0) {
+      toast({
+        title: "PDF not allowed",
+        description:
+          "PDF files are not allowed. Please attach an image or a .doc/.docx file.",
+        variant: "destructive",
+      });
+    }
+
+    setAttachments(nonPdfs.slice(0, 1)); // keep only the first non-pdf file (existing behaviour)
+  };
+
+  const handleReplyFileChange = (file: File | null) => {
+    if (!file) return setReplyAttachment(null);
+    if (isPdf(file)) {
+      toast({
+        title: "PDF not allowed",
+        description:
+          "PDF files are not allowed. Please attach an image or a .doc/.docx file.",
+        variant: "destructive",
+      });
+      // clear underlying input as well
+      const el = document.getElementById(
+        "reply-file"
+      ) as HTMLInputElement | null;
+      if (el) el.value = "";
+      return setReplyAttachment(null);
+    }
+
+    setReplyAttachment(file);
   };
 
   // JSX skeletons and markup remain mostly the same but use replyPreviewUrl for the preview image
@@ -750,10 +815,10 @@ export default function Support() {
                             <input
                               id="reply-file"
                               type="file"
-                              accept="image/*,.pdf,.doc,.docx"
+                              accept="image/*"
                               className="hidden"
                               onChange={(e) => {
-                                setReplyAttachment(
+                                handleReplyFileChange(
                                   e.currentTarget.files?.[0] ?? null
                                 );
                               }}
@@ -872,9 +937,9 @@ export default function Support() {
                   <input
                     id="ticket-file-upload"
                     type="file"
-                    accept="image/*,.pdf,.doc,.docx"
+                    accept="image/*"
                     onChange={(e) =>
-                      setAttachments(Array.from(e.target.files || []))
+                      handleTicketFileChange(e.target.files || null)
                     }
                     className="hidden"
                   />

@@ -326,6 +326,7 @@ export default function Profile() {
                     <Input
                       defaultValue={`${profile.firstName} ${profile.lastName}`}
                       className="bg-input border-border"
+                      readOnly
                     />
                   </div>
 
@@ -337,6 +338,7 @@ export default function Profile() {
                       defaultValue={profile.email}
                       type="email"
                       className="bg-input border-border"
+                      readOnly
                     />
                   </div>
 
@@ -346,6 +348,7 @@ export default function Profile() {
                       defaultValue={profile.phoneNumber}
                       type="tel"
                       className="bg-input border-border"
+                      readOnly
                     />
                   </div>
                 </div>
