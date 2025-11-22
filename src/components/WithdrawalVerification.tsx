@@ -65,13 +65,17 @@ const WithdrawalVerification = ({
 }: WithdrawalVerificationProps) => {
   const status = (withdrawal?.status || "").toUpperCase();
 
-  // Preview + upload state
+  // Use refs for state that should NOT be reset by parent re-renders
+  const isUploadingRef = useRef(false);
+  const uploadProgressRef = useRef(0);
+
+  // Local state for UI updates
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadedImage, setUploadedImage] = useState<string>(
     withdrawal.screenshotUrl || ""
   );
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-
-  // Single source of truth whether upload is present or we should hide upload UI.
   const [hasServerUpload, setHasServerUpload] = useState<boolean>(() => {
     const serverHasUrl = Boolean(withdrawal?.screenshotUrl);
     const statusIndicatesClientUploaded = [
@@ -82,38 +86,29 @@ const WithdrawalVerification = ({
     return serverHasUrl || statusIndicatesClientUploaded;
   });
 
-  const [isUploading, setIsUploading] = useState(false);
   const [adminImgError, setAdminImgError] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
   const [adminImgLoading, setAdminImgLoading] = useState(false);
   const [isAdminProofOpen, setIsAdminProofOpen] = useState(false);
 
-  // Keep uploadedImage and hasServerUpload synced when props change
   useEffect(() => {
-    if (withdrawal.screenshotUrl) {
-      setUploadedImage((prev) => prev || withdrawal.screenshotUrl!);
-    }
-    const serverHasUrl = Boolean(withdrawal?.screenshotUrl);
-    const statusIndicatesClientUploaded = [
-      "REVIEW",
-      "APPROVED",
-      "COMPLETE",
-    ].includes(status);
+    isUploadingRef.current = isUploading;
+    uploadProgressRef.current = uploadProgress;
+  }, [isUploading, uploadProgress]);
 
-    // ❗ Important: do NOT override local upload state while uploading
-    if (!isUploading) {
+  useEffect(() => {
+    if (!isUploadingRef.current) {
+      if (withdrawal.screenshotUrl) {
+        setUploadedImage((prev) => prev || withdrawal.screenshotUrl!);
+      }
+      const serverHasUrl = Boolean(withdrawal?.screenshotUrl);
+      const statusIndicatesClientUploaded = [
+        "REVIEW",
+        "APPROVED",
+        "COMPLETE",
+      ].includes(status);
       setHasServerUpload(serverHasUrl || statusIndicatesClientUploaded);
     }
-  }, [withdrawal.screenshotUrl, status, isUploading]);
-
-  // track mounted to avoid setting state on unmounted component
-  const mountedRef = useRef(true);
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
+  }, [withdrawal.screenshotUrl, status]);
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] || null;
@@ -127,43 +122,80 @@ const WithdrawalVerification = ({
 
   // Enhanced upload with progress animation and minimum duration
   const handleUpload = async () => {
-    if (!selectedFile || hasServerUpload || isUploading) return;
+    if (!selectedFile || hasServerUpload || isUploadingRef.current) return;
 
+    console.log("🔄 Starting upload...");
+
+    // Set both ref and state
+    isUploadingRef.current = true;
     setIsUploading(true);
-    setUploadProgress(6);
-    const startTime = Date.now();
+    uploadProgressRef.current = 0;
+    setUploadProgress(0);
 
+    const startTime = Date.now();
     let active = true;
+
+    console.log("🔄 isUploading set to:", true);
+
+    // Progress animation
     const progressId = window.setInterval(() => {
       if (!active) return;
-      setUploadProgress((p) => {
-        if (p >= 92) return p;
-        return Math.min(92, p + Math.random() * 8 + 1);
-      });
-    }, 400);
+      const newProgress = Math.min(
+        95,
+        uploadProgressRef.current + Math.random() * 10 + 5
+      );
+      uploadProgressRef.current = newProgress;
+      setUploadProgress(newProgress);
+    }, 200);
 
     try {
+      console.log("🔄 Calling onUploadScreenshot...");
       const res = await onUploadScreenshot(selectedFile);
       const elapsed = Date.now() - startTime;
 
       active = false;
       clearInterval(progressId);
+
+      // Set to 100% immediately after upload completes
+      uploadProgressRef.current = 100;
       setUploadProgress(100);
+      console.log("✅ Upload completed, setting progress to 100%");
 
-      const extraDelay = Math.max(0, MIN_UPLOAD_DURATION_MS - elapsed);
-      await new Promise((r) => setTimeout(r, extraDelay || 300));
+      // Ensure minimum 2.5 seconds loading time
+      const remainingTime = Math.max(0, MIN_UPLOAD_DURATION_MS - elapsed);
+      console.log(`⏰ Remaining time to wait: ${remainingTime}ms`);
 
-      if (mountedRef.current && res?.success) {
+      if (remainingTime > 0) {
+        await new Promise((r) => setTimeout(r, remainingTime));
+      }
+
+      if (res?.success) {
+        console.log("✅ Upload successful, updating state");
         setHasServerUpload(true);
         setSelectedFile(null);
       }
-    } catch (e) {
+    } catch (error) {
+      console.error("❌ Upload failed:", error);
       active = false;
       clearInterval(progressId);
+      uploadProgressRef.current = 0;
       setUploadProgress(0);
     } finally {
-      await new Promise((r) => setTimeout(r, 200));
-      if (mountedRef.current) setIsUploading(false);
+      // Always ensure we show loader for at least 2.5 seconds
+      const totalElapsed = Date.now() - startTime;
+      const remainingTime = Math.max(0, MIN_UPLOAD_DURATION_MS - totalElapsed);
+
+      console.log(`⏰ Final remaining time: ${remainingTime}ms`);
+
+      if (remainingTime > 0) {
+        await new Promise((r) => setTimeout(r, remainingTime));
+      }
+
+      console.log("🔚 Setting isUploading to false");
+      isUploadingRef.current = false;
+      setIsUploading(false);
+      uploadProgressRef.current = 0;
+      setUploadProgress(0);
     }
   };
 
@@ -258,6 +290,16 @@ const WithdrawalVerification = ({
     if (safeCount >= 2) return "text-warning";
     return "text-success";
   };
+
+  // Debug current state
+  console.log("🔍 Current State:", {
+    isUploading,
+    uploadProgress,
+    uploadedImage: !!uploadedImage,
+    selectedFile: !!selectedFile,
+    hasServerUpload,
+    showUploadSection,
+  });
 
   return (
     <Card className="card-premium">
@@ -467,11 +509,14 @@ const WithdrawalVerification = ({
                 <div className="relative border-2 border-dashed border-border rounded-lg p-4">
                   {/* overlay spinner while uploading */}
                   {isUploading && (
-                    <div className="absolute inset-0 bg-white/60 flex items-center justify-center rounded-lg">
-                      <div className="flex flex-col items-center gap-2">
-                        <Spinner className="w-8 h-8 text-primary" />
-                        <div className="text-sm text-primary">
+                    <div className="absolute inset-0 bg-white/80 flex items-center justify-center rounded-lg z-10 border-2 border-primary/20">
+                      <div className="flex flex-col items-center gap-3 bg-white p-6 rounded-lg shadow-lg">
+                        <Spinner className="w-10 h-10 text-primary" />
+                        <div className="text-lg font-semibold text-primary">
                           Uploading... {Math.round(uploadProgress)}%
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          Please wait while we upload your proof
                         </div>
                       </div>
                     </div>
@@ -486,12 +531,12 @@ const WithdrawalVerification = ({
 
                 {/* animated progress bar for upload (visible while uploading) */}
                 {isUploading && (
-                  <div>
+                  <div className="space-y-2">
                     <Progress
                       value={Math.round(uploadProgress)}
-                      className="h-2 transition-all duration-300"
+                      className="h-3 transition-all duration-300 bg-muted"
                     />
-                    <div className="text-xs text-muted-foreground mt-1">
+                    <div className="text-xs text-muted-foreground text-center">
                       Uploading snapshot — please do not close the window
                     </div>
                   </div>
@@ -516,7 +561,7 @@ const WithdrawalVerification = ({
                     {isUploading ? (
                       <div className="flex items-center justify-center gap-2">
                         <Spinner className="w-4 h-4 text-white" />
-                        <span>Uploading...</span>
+                        <span>Uploading... {Math.round(uploadProgress)}%</span>
                       </div>
                     ) : (
                       "Upload Proof"
@@ -526,7 +571,22 @@ const WithdrawalVerification = ({
               </div>
             ) : (
               <div className="space-y-4">
-                <div className="border-2 border-dashed border-border rounded-lg p-8 text-center transition-shadow hover:shadow-lg">
+                <div className="border-2 border-dashed border-border rounded-lg p-8 text-center transition-shadow hover:shadow-lg relative">
+                  {/* Show loading overlay on the upload area when uploading */}
+                  {isUploading && (
+                    <div className="absolute inset-0 bg-white/80 flex items-center justify-center rounded-lg z-10 border-2 border-primary/20">
+                      <div className="flex flex-col items-center gap-3 bg-white p-6 rounded-lg shadow-lg">
+                        <Spinner className="w-10 h-10 text-primary" />
+                        <div className="text-lg font-semibold text-primary">
+                          Uploading... {Math.round(uploadProgress)}%
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          Please wait while we upload your proof
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   <Upload className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
                   <Label
                     htmlFor={`screenshot-upload-${withdrawal.id}`}
@@ -546,7 +606,7 @@ const WithdrawalVerification = ({
                     accept="image/*"
                     onChange={handleFileSelect}
                     className="hidden"
-                    disabled={hasServerUpload}
+                    disabled={hasServerUpload || isUploading}
                   />
                   <p className="text-xs text-muted-foreground mt-2">
                     PNG, JPG up to 5MB
@@ -562,7 +622,7 @@ const WithdrawalVerification = ({
                     {isUploading ? (
                       <div className="flex items-center justify-center gap-2">
                         <Spinner className="w-4 h-4 text-white" />
-                        <span>Uploading...</span>
+                        <span>Uploading... {Math.round(uploadProgress)}%</span>
                       </div>
                     ) : (
                       "Upload Proof"

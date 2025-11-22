@@ -861,23 +861,27 @@ export default function Withdraw() {
       startIndex + itemsPerPage
     );
 
+    // Add a key to each WithdrawalVerification to prevent re-mounting
     return (
       <div className="space-y-4">
         {pendingVerifications.length > 0 &&
           pendingVerifications.map((withdrawal) => (
-            <div key={withdrawal.id} className="mb-4">
+            <div key={`verification-${withdrawal.id}`} className="mb-4">
               <WithdrawalVerification
+                key={`verification-component-${withdrawal.id}`} // Add unique key
                 withdrawal={withdrawal}
-                pendingUploadsCount={totalPendingUploads} // pass total pending count
+                pendingUploadsCount={totalPendingUploads}
                 onUploadScreenshot={async (file: File) => {
                   const txId = Number(withdrawal.txIdRaw ?? withdrawal.id);
-                  await uploadWithdrawProof({
-                    transactionId: txId,
-                    screenshot: file,
-                  }).unwrap();
-                  // ensure we refetch so the component receives updated screenshotUrl/status
-                  await refetchTransactions();
-                  return { success: true };
+                  try {
+                    await uploadWithdrawProof({
+                      transactionId: txId,
+                      screenshot: file,
+                    }).unwrap();
+                    return { success: true };
+                  } catch (error) {
+                    return { success: false };
+                  }
                 }}
               />
             </div>
