@@ -1,4 +1,3 @@
-// src/components/WithdrawalVerification.tsx
 import { useEffect, useMemo, useState, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,6 +15,12 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 interface WithdrawalVerificationProps {
   withdrawal: {
@@ -36,16 +41,8 @@ interface WithdrawalVerificationProps {
   pendingUploadsCount: number;
 }
 
-const API_ORIGIN =
-  (import.meta as any).env?.VITE_API_BASE_URL || "http://localhost:3000";
-
-const normalizeImageUrl = (url?: string) => {
-  if (!url) return "";
-  if (/^https?:\/\//i.test(url)) return url;
-  return `${API_ORIGIN}${url.startsWith("/") ? "" : "/"}${url}`;
-};
-
 const MAX_PENDING_UPLOADS = 3;
+const MIN_UPLOAD_DURATION_MS = 2500;
 
 // Small CSS spinner used where icons are not sufficient
 const Spinner = ({ className = "w-6 h-6" }: { className?: string }) => (
@@ -89,6 +86,7 @@ const WithdrawalVerification = ({
   const [adminImgError, setAdminImgError] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [adminImgLoading, setAdminImgLoading] = useState(false);
+  const [isAdminProofOpen, setIsAdminProofOpen] = useState(false);
 
   // Keep uploadedImage and hasServerUpload synced when props change
   useEffect(() => {
@@ -101,8 +99,12 @@ const WithdrawalVerification = ({
       "APPROVED",
       "COMPLETE",
     ].includes(status);
-    setHasServerUpload(serverHasUrl || statusIndicatesClientUploaded);
-  }, [withdrawal.screenshotUrl, status]);
+
+    // ❗ Important: do NOT override local upload state while uploading
+    if (!isUploading) {
+      setHasServerUpload(serverHasUrl || statusIndicatesClientUploaded);
+    }
+  }, [withdrawal.screenshotUrl, status, isUploading]);
 
   // track mounted to avoid setting state on unmounted component
   const mountedRef = useRef(true);
@@ -123,56 +125,44 @@ const WithdrawalVerification = ({
     }
   };
 
-  // Enhanced upload with progress animation — we can't hook into parent's fetch
-  // so we simulate smooth progress until the parent's promise resolves.
+  // Enhanced upload with progress animation and minimum duration
   const handleUpload = async () => {
-    if (!selectedFile || hasServerUpload) return;
+    if (!selectedFile || hasServerUpload || isUploading) return;
+
     setIsUploading(true);
     setUploadProgress(6);
+    const startTime = Date.now();
 
-    // simulate progressive increments until we reach 90% or the promise resolves
     let active = true;
-    const runProgress = () => {
-      const id = setInterval(() => {
-        setUploadProgress((p) => {
-          // while uploading, gently increase progress toward 92
-          const next = Math.min(92, p + Math.random() * 8 + 1);
-          return next;
-        });
-      }, 400);
-      return id;
-    };
-
-    const progressId = runProgress();
+    const progressId = window.setInterval(() => {
+      if (!active) return;
+      setUploadProgress((p) => {
+        if (p >= 92) return p;
+        return Math.min(92, p + Math.random() * 8 + 1);
+      });
+    }, 400);
 
     try {
       const res = await onUploadScreenshot(selectedFile);
+      const elapsed = Date.now() - startTime;
 
-      // finish animation
+      active = false;
       clearInterval(progressId);
-      // animate to 100% smoothly
       setUploadProgress(100);
 
-      // show final state briefly
-      await new Promise((r) => setTimeout(r, 450));
+      const extraDelay = Math.max(0, MIN_UPLOAD_DURATION_MS - elapsed);
+      await new Promise((r) => setTimeout(r, extraDelay || 300));
 
-      if (mountedRef.current) {
+      if (mountedRef.current && res?.success) {
         setHasServerUpload(true);
         setSelectedFile(null);
-        // set uploaded image to server-supplied URL (if parent updated via props, effect will update)
-      }
-
-      // optionally use returned success
-      if (!res || !res.success) {
-        // keep serverUpload false — but UI should show failed state.
       }
     } catch (e) {
-      // upload failed — show a quick roll-back animation and leave selectedFile for retry
+      active = false;
       clearInterval(progressId);
       setUploadProgress(0);
     } finally {
-      // short delay for polish
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 200));
       if (mountedRef.current) setIsUploading(false);
     }
   };
@@ -327,37 +317,69 @@ const WithdrawalVerification = ({
             </div>
 
             {!adminImgError ? (
-              <div className="relative border rounded-md p-2 bg-muted/10 overflow-hidden">
-                {/* loading skeleton / spinner while admin image loads */}
-                <div
-                  className={cn(
-                    "absolute inset-0 flex items-center justify-center transition-opacity",
-                    {
-                      "opacity-0": !adminImgLoading,
-                      "opacity-100": adminImgLoading,
-                    }
-                  )}
+              <>
+                {/* Thumbnail with skeleton + click to open modal */}
+                <button
+                  type="button"
+                  onClick={() => setIsAdminProofOpen(true)}
+                  className="relative border rounded-md p-2 bg-muted/10 overflow-hidden w-full text-left group"
                 >
-                  <div className="flex flex-col items-center gap-2">
-                    <Spinner className="w-8 h-8 text-muted-foreground" />
-                    <span className="text-xs text-muted-foreground">
-                      Loading proof
-                    </span>
+                  {/* loading skeleton / spinner while admin image loads */}
+                  <div
+                    className={cn(
+                      "absolute inset-0 flex items-center justify-center transition-opacity pointer-events-none",
+                      {
+                        "opacity-0": !adminImgLoading,
+                        "opacity-100": adminImgLoading,
+                      }
+                    )}
+                  >
+                    <div className="flex flex-col items-center gap-2">
+                      <Spinner className="w-8 h-8 text-muted-foreground" />
+                      <span className="text-xs text-muted-foreground">
+                        Loading proof
+                      </span>
+                    </div>
                   </div>
-                </div>
 
-                <img
-                  src={normalizeImageUrl(withdrawal.adminProofUrl)}
-                  alt="Admin proof"
-                  className="w-full max-h-60 object-contain rounded transition-transform duration-500 hover:scale-105"
-                  onError={() => setAdminImgError(true)}
-                  onLoad={() => setAdminImgLoading(false)}
-                  crossOrigin="anonymous"
-                />
-              </div>
+                  <img
+                    src={withdrawal.adminProofUrl}
+                    alt="Admin payment proof"
+                    className="w-full max-h-60 object-contain rounded transition-transform duration-500 group-hover:scale-105"
+                    onError={() => setAdminImgError(true)}
+                    onLoad={() => setAdminImgLoading(false)}
+                    crossOrigin="anonymous"
+                  />
+
+                  <div className="absolute bottom-2 right-2 bg-background/80 backdrop-blur px-2 py-1 rounded text-xs text-muted-foreground flex items-center gap-1">
+                    <ExternalLink className="w-3 h-3" />
+                    <span>Click to view</span>
+                  </div>
+                </button>
+
+                {/* Fullscreen-ish modal */}
+                <Dialog
+                  open={isAdminProofOpen}
+                  onOpenChange={(open) => setIsAdminProofOpen(open)}
+                >
+                  <DialogContent className="max-w-5xl w-full max-h-[90vh] p-4">
+                    <DialogHeader>
+                      <DialogTitle>Admin Payment Proof</DialogTitle>
+                    </DialogHeader>
+                    <div className="w-full h-full flex items-center justify-center">
+                      <img
+                        src={withdrawal.adminProofUrl}
+                        alt="Admin payment proof full view"
+                        className="max-h-[80vh] w-auto object-contain rounded-md"
+                        crossOrigin="anonymous"
+                      />
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </>
             ) : (
               <a
-                href={normalizeImageUrl(withdrawal.adminProofUrl)}
+                href={withdrawal.adminProofUrl}
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex items-center gap-2 text-sm underline"
@@ -479,6 +501,7 @@ const WithdrawalVerification = ({
                   <Button
                     onClick={handleVerificationComplete}
                     className="w-full gradient-primary text-white"
+                    disabled={isUploading}
                   >
                     Confirm & Submit for Review
                   </Button>
@@ -487,7 +510,7 @@ const WithdrawalVerification = ({
                 {!hasServerUpload && (
                   <Button
                     onClick={handleUpload}
-                    disabled={isUploading}
+                    disabled={isUploading || !selectedFile}
                     className="w-full gradient-primary text-white"
                   >
                     {isUploading ? (
@@ -533,7 +556,7 @@ const WithdrawalVerification = ({
                 {selectedFile && !hasServerUpload && (
                   <Button
                     onClick={handleUpload}
-                    disabled={isUploading}
+                    disabled={isUploading || !selectedFile}
                     className="w-full gradient-primary text-white"
                   >
                     {isUploading ? (
