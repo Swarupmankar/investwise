@@ -1,6 +1,3 @@
-// src/pages/CreateInvestment.tsx (MERGED)
-// New multi-plan UI + Old integrated API/validation/submit flow
-
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -39,7 +36,7 @@ const investmentPlans = [
     minWithdrawal: 100,
     duration: "1 month",
     description:
-      "Earn 5% monthly returns with flexible deposits and 1% referral bonus.",
+      "Earn 5% monthly returns with a 3-month commitment and a one-time 5% referral bonus.",
     risk: "Medium",
     isAvailable: true,
     referralBonus: 1,
