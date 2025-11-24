@@ -36,7 +36,7 @@ const investmentPlans = [
     minWithdrawal: 100,
     duration: "1 month",
     description:
-      "Earn 5% monthly returns with a 3-month commitment and a one-time 5% referral bonus.",
+      "Earn 5% monthly returns with flexible deposits and a 1% monthly referral bonus.",
     risk: "Medium",
     isAvailable: true,
     referralBonus: 1,
@@ -49,7 +49,7 @@ const investmentPlans = [
     minWithdrawal: 100,
     duration: "3 months",
     description:
-      "Earn 5% monthly returns with 3-month commitment and 5% referral bonus.",
+      "Earn 5% monthly returns with a 3-month commitment and a one-time 5% referral bonus.",
     risk: "Medium",
     isAvailable: true,
     referralBonus: 5,
