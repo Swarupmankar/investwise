@@ -116,8 +116,8 @@ const computeMonthlyCycle = (referenceDate?: string | Date) => {
   if (daysCompleted < 0) daysCompleted = 0;
   if (daysCompleted > totalDays) daysCompleted = totalDays;
 
-  // days remaining: from tomorrow to maturity (exclude today)
-  let daysRemaining = differenceInCalendarDays(maturityDate, startOfTomorrow);
+  // days remaining: INCLUDE today (count from today up to maturity)
+  let daysRemaining = differenceInCalendarDays(maturityDate, startOfToday);
   if (daysRemaining < 0) daysRemaining = 0;
 
   const progressPct = (daysCompleted / totalDays) * 100;
@@ -134,11 +134,7 @@ const computeMonthlyCycle = (referenceDate?: string | Date) => {
   };
 };
 
-/** NEW: 3-month referral cycle
- * start = creation date
- * maturity = 1st of the month three months after creation month
- *   e.g., created Nov 04 ⇒ Feb 01; created Nov 29 ⇒ Feb 01
- */
+// 3-month referral cycle
 const computeReferralThreeMonthCycle = (referenceDate?: string | Date) => {
   const now = new Date();
 
@@ -189,8 +185,8 @@ const computeReferralThreeMonthCycle = (referenceDate?: string | Date) => {
   if (daysCompleted < 0) daysCompleted = 0;
   if (daysCompleted > totalDays) daysCompleted = totalDays;
 
-  // days remaining: from tomorrow to maturity (exclude today)
-  let daysRemaining = differenceInCalendarDays(maturityDate, startOfTomorrow);
+  // days remaining: INCLUDE today (count from today up to maturity)
+  let daysRemaining = differenceInCalendarDays(maturityDate, startOfToday);
   if (daysRemaining < 0) daysRemaining = 0;
 
   const progressPct = (daysCompleted / totalDays) * 100;
@@ -684,7 +680,6 @@ export default function Dashboard() {
                 }
               );
 
-              // ---- FIX: compute prorated amount for creation month only ----
               let monthlyEstimateAmount = fullMonthlyReturn; // default: full month
 
               try {
@@ -699,29 +694,26 @@ export default function Dashboard() {
                   created.getFullYear() === now.getFullYear() &&
                   created.getMonth() === now.getMonth()
                 ) {
-                  // days remaining in the calendar month starting from creation date (creation-day inclusive)
-                  // compute days between first of next month and creation date
+                  // days remaining in the calendar month FROM TODAY (include today)
                   const firstOfNext = firstOfNextMonth(created);
-                  const creationDayStart = new Date(
-                    created.getFullYear(),
-                    created.getMonth(),
-                    created.getDate()
+                  const startOfToday = new Date(
+                    now.getFullYear(),
+                    now.getMonth(),
+                    now.getDate()
                   );
-                  let daysRemainingFromCreation = differenceInCalendarDays(
+                  let daysRemainingFromToday = differenceInCalendarDays(
                     firstOfNext,
-                    creationDayStart
+                    startOfToday
                   );
-                  if (daysRemainingFromCreation < 0)
-                    daysRemainingFromCreation = 0;
-                  // prorate by daysRemainingFromCreation / daysInThisMonth
+                  if (daysRemainingFromToday < 0) daysRemainingFromToday = 0;
+
+                  // prorate by daysRemainingFromToday / daysInThisMonth
                   monthlyEstimateAmount =
-                    (fullMonthlyReturn * daysRemainingFromCreation) /
+                    (fullMonthlyReturn * daysRemainingFromToday) /
                     daysInThisMonth;
                 } else {
-                  // not created this month => show full month return (monthlyEstimateAmount already set)
                 }
               } catch {
-                // Fallback: keep full monthly amount
                 monthlyEstimateAmount = fullMonthlyReturn;
               }
 

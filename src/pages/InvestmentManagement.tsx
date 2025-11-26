@@ -166,8 +166,8 @@ const computeMonthlyCycle = (startDateCandidate?: Date) => {
     progressPct: Math.max(0, Math.min(100, progressPct)),
     progressRounded: Math.round(Math.max(0, Math.min(100, progressPct))),
 
-    // close button date
-    isFirstOfMonthToday: now.getDate() === 24,
+    // close button 1-months
+    isFirstOfMonthToday: now.getDate() === 26,
   };
 };
 
@@ -231,7 +231,9 @@ const computeReferralThreeMonthCycle = (startDateCandidate?: Date) => {
     totalDays,
     progressPct: Math.max(0, Math.min(100, progressPct)),
     progressRounded: Math.round(Math.max(0, Math.min(100, progressPct))),
-    isFirstOfMonthToday: now.getDate() === 1,
+
+    // close button 3-months
+    isFirstOfMonthToday: now.getDate() === 26,
   };
 };
 /** Component **/
