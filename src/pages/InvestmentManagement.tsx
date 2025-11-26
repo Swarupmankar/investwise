@@ -126,16 +126,13 @@ const computeMonthlyCycle = (startDateCandidate?: Date) => {
     parsedStart.getFullYear() === now.getFullYear() &&
     parsedStart.getMonth() === now.getMonth()
   ) {
-    // created in current month: start from creation date, mature on 1st of next month after creation month
     startOfCycle = parsedStart;
     maturityDate = firstOfNextMonth(startOfCycle);
   } else {
-    // fallback: first of current month -> first of next month
     startOfCycle = startOfThisMonth;
     maturityDate = firstOfNext;
   }
 
-  // total days in the counted cycle (calendar days)
   let totalDays = differenceInCalendarDays(maturityDate, startOfCycle);
   if (totalDays <= 0) totalDays = 1;
 
@@ -147,11 +144,10 @@ const computeMonthlyCycle = (startDateCandidate?: Date) => {
   if (daysCompleted < 0) daysCompleted = 0;
   if (daysCompleted > totalDays) daysCompleted = totalDays;
 
-  // days remaining: from tomorrow to maturity (exclude today)
-  let daysRemaining = differenceInCalendarDays(maturityDate, startOfTomorrow);
+  // *** FIXED: days remaining now INCLUDES today (count from startOfToday) ***
+  let daysRemaining = differenceInCalendarDays(maturityDate, startOfToday);
   if (daysRemaining < 0) daysRemaining = 0;
 
-  // days in calendar month for display (use the current month length)
   const daysInThisMonth = lastOfMonth(now).getDate();
 
   const progressPct = (daysCompleted / totalDays) * 100;
@@ -171,6 +167,7 @@ const computeMonthlyCycle = (startDateCandidate?: Date) => {
   };
 };
 
+/** 3-month rolling cycle) */
 const computeReferralThreeMonthCycle = (startDateCandidate?: Date) => {
   const now = new Date();
 
@@ -208,7 +205,6 @@ const computeReferralThreeMonthCycle = (startDateCandidate?: Date) => {
   let totalDays = differenceInCalendarDays(maturityDate, startOfCycle);
   if (totalDays <= 0) totalDays = 1;
 
-  // days completed: full days finished up to today (exclude today)
   let daysCompleted = differenceInCalendarDays(
     startOfToday < maturityDate ? startOfToday : maturityDate,
     startOfCycle
@@ -216,8 +212,7 @@ const computeReferralThreeMonthCycle = (startDateCandidate?: Date) => {
   if (daysCompleted < 0) daysCompleted = 0;
   if (daysCompleted > totalDays) daysCompleted = totalDays;
 
-  // days remaining: from tomorrow to maturity (exclude today)
-  let daysRemaining = differenceInCalendarDays(maturityDate, startOfTomorrow);
+  let daysRemaining = differenceInCalendarDays(maturityDate, startOfToday);
   if (daysRemaining < 0) daysRemaining = 0;
 
   const progressPct = (daysCompleted / totalDays) * 100;
@@ -232,10 +227,12 @@ const computeReferralThreeMonthCycle = (startDateCandidate?: Date) => {
     progressPct: Math.max(0, Math.min(100, progressPct)),
     progressRounded: Math.round(Math.max(0, Math.min(100, progressPct))),
 
-    // close button 3-months
+    // close button 3-months (keeps your existing check)
     isFirstOfMonthToday: now.getDate() === 26,
   };
 };
+
+
 /** Component **/
 export default function InvestmentManagement(): JSX.Element {
   const { id } = useParams();
