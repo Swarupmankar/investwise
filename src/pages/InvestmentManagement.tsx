@@ -163,7 +163,7 @@ const computeMonthlyCycle = (startDateCandidate?: Date) => {
     progressRounded: Math.round(Math.max(0, Math.min(100, progressPct))),
 
     // close button 1-months
-    isFirstOfMonthToday: now.getDate() === 26,
+    isFirstOfMonthToday: now.getDate() === 27,
   };
 };
 
@@ -228,10 +228,9 @@ const computeReferralThreeMonthCycle = (startDateCandidate?: Date) => {
     progressRounded: Math.round(Math.max(0, Math.min(100, progressPct))),
 
     // close button 3-months (keeps your existing check)
-    isFirstOfMonthToday: now.getDate() === 26,
+    isFirstOfMonthToday: now.getDate() === 27,
   };
 };
-
 
 /** Component **/
 export default function InvestmentManagement(): JSX.Element {
